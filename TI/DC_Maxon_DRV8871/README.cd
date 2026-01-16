@@ -1,0 +1,140 @@
+//========================== REMINDER DELLE POSSIBILI PROBLEMATICHE LEGATE ALLO SVILUPPO DEL FIRMWARE DI CONTROLLO MOTORE ==========================//
+
+//////////////////////// LETTURE DEL POTENZIOMETRO ////////////////////////
+Il pot fermo non dà quasi mai letture “piatte”. Quello che vedi sono rumore + quantizzazione + accoppiamenti.
+
+-> Perché oscilla
+	- Quantizzazione
+		ADC 12-bit a 3.3 V -> 1 LSB circa 0.8 mV. È fisiologico vedere ±1–2 LSB anche a input stabile.
+	- Rumore elettrico
+		Anche se il pot è un sensore di posizione (quindi a bassa frequenza), il suo segnale può “sporcarsi” per accoppiamento elettrico e per ground bounce. 
+		Se campioni in momenti casuali rispetto al PWM, leggerai valori leggermente diversi a seconda di dove “capiti” dentro al ciclo => il grafico a regime “ondeggia”
+		
+		RTI vs SOCA (sincronizzare l’ADC con l’ePWM)
+		
+		- Trigger attuale (RTI 1 kHz): l’ADC parte a cadenza fissa ma senza relazione di fase con la PWM (50 kHz). La fase relativa tra istante di campionamento e fronti 
+			PWM “slitta” continuamente (50 periodi PWM per ogni campione ADC): a volte misuri vicino a un fronte (più rumore), a volte al centro del plateau (più pulito). 
+			Risultato: jitter di codice anche col pot fermo.
+			
+		- Trigger sincronizzato (ePWM SOCA): l’ADC parte sempre allo stesso punto del periodo PWM (es. CTR=PRD o CTR=ZERO, oppure su CMPA up/down). Se scegli un punto 
+			lontano dai fronti, campioni sempre in una zona “piatta” => stessa fase => minima variazione dovuta alla ripple
+			
+			Perché CTR=PRD è un buon istante con PWM center-aligned
+			
+			Con AQ “SET @ CAU, CLEAR @ CAD” in Up-Down, gli edge del PWM stanno proprio su CAU e CAD, simmetrici rispetto al centro del periodo. 
+			L’istante CTR=PRD (picco del contatore, inversione di direzione) cade a metà tra i due fronti: è il punto più “lontano temporalmente” da entrambi, quindi in media 
+			è il più “quieto”. (CTR=ZERO è equivalente, ma PRD è spesso più lontano dai fronti quando il duty è intorno al 50%.)
+			In alternativa puoi usare CTR=ZERO o un evento su CMPA scegliendo il lato “piatto” (ON o OFF) che preferisci
+		
+		Cosa cambia operativamente sul RM57
+		
+		- Sposti il trigger dell’ADC dal RTI al SOCA dell’ePWM1
+		- Oversampling sincrono alla PWM.
+			A 50 kHz PWM e controllo a 1 kHz, puoi accumulare 50 campioni (uno per ciclo PWM) e farne la media per ogni tick di controllo. Così riduci tantissimo il ripple “intrinseco”.
+			Se serve, applica un EMA o una media mobile dopo l’oversampling sincronizzato (di solito basterà l’OSR).
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//////////////////////// CONFIGURAZIONE ETPWM1 ////////////////////////
+Con quella AQ (Set @ CAU, Clear @ CAD) il duty “alto” dura da CAU a CAD; in Up-Down significa:
+
+duty = (TBPRD - CMP)/TBPRD => CMP = (1 - duty) * TBPRD
+
+Quindi la tua mappatura cmp = (1.0f - duty01) * prd è coerente con l’AQ che hai impostato. 
+Con questa AQ:
+- duty01 = 0.00 => cmp = PRD => impulso “alto” nullo => uscita bassa (0%).
+- duty01 = 1.00 => cmp = 0 => impulso “alto” per (quasi) tutto il periodo =>  circa100%.
+- valori intermedi: duty alto = 1 - CMP/TBPRD.
+
+Il ponte H del driver motore può essere programmato per gestire il ricircolo della corrente durante le fasi OFF dei FETS in due modalità:
+1) ricircolo ASINCRONO della corrente 	=> modalità COAST => la corrente viene fatta ricircolare in modo incontrollato sui body-diode dei FETS => GRANDE DISSIPAZIONE DI POTENZA
+2) ricircolo SINCRONO della corrente 	=> modalità BRAKE => la corrente viene fatta ricircolare in modo controllato attivando i diodi integrati nei FETS che per i driver (DRV8871 e 
+	DRV 8231a) sono quelli della maglia inferiore => si tratta di un RICIRCOLO SINCRONO E SLOW DELLA CORRENTE => il motore viene fermato grazie all'azione delle back EMF
+	ponte H => PICCOLE DISSIPAZIONI DI POTENZA & PICCOLO RIPPLE DI CORRENTE, MENO RISCALDAMENTO DEL MOTORE
+
+IN ENTRAMBI I CASI QUANDO CAMBIA LA DIREZIONE DELLA CORRENTE NEL PONTE H BISOGNA CONSIDERARE IL DEAD-TIME CHE PRECEDE IL RICIRCOLO DELLA CORRENTE E SERVE A PREVENIRE LO SHOOT-THROUGH
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//////////////////// ANTI-WINDUP //////////////////////////////
+quando entri nello “stop” (brake->coast) stacchi davvero l’attuatore, quindi per l’anti-windup devi far credere all’integratore che l’uscita reale sia zero. In simboli:
+- calcoli comunque (quello che vorrebbe il PID)
+- poichè sei in stop poniamo u = 0 (nessuna coppia)
+- aggiorni l'integratore con il back-calculation Kaw*(u_sat - u_unsat)
+
+Se prima di entrare in stop il PID “voleva” una coppia positiva (u_unsat > 0) ma tu lo metti a zero, il termine => il termine (0 - u_unsat) è negativo e tira giù Iterm: l’integratore si svuota invece di rimanere carico
+Viceversa se u_unsat < 0 => lo tira su. Così, quando esci dallo stop, non hai scie/overshoot dovute a un integratore “gonfio”
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/////////////////// DERIVATA SU ERRORE O SU MISURA? /////////////////////////
+Nel tuo codice la D è sulla derivata dell’errore e. Questo è classico, ma ha il fenomeno del derivative kick:
+
+Se cambi il setpoint bruscamente, e fa uno step => de/dt enorme => spike del termine D => colpetto del motore
+
+Alternativa: fare la derivata sulla misura y_adc
+
+Nel tuo codice il D è la derivata dell’errore filtrata con un passa-basso (Td). Serve a smorzare e anticipare, riducendo overshoot. 
+Tienilo piccolo e filtrato, valuta la derivata sulla misura per evitare “kick” ai cambi di setpoint, e ricordati che molte volte un PI ben tarato è già sufficiente.
+
+mettere un filtro digitale del 1° ordine sul ramo D è esattamente la cosa giusta.
+E “Butterworth” per un filtro del primo ordine coincide semplicemente con un passa-basso a singolo polo con pendenza -20 dB/dec e -3 dB alla frequenza di taglio: quindi sì, è quello che vuoi.
+Derivata sulla misura:
+- D è proporzionale a -dy/dt. Quando il set-point cambia di colpo, il ramo D non “impazzisce” (niente kick). È la scelta più robusta in applicazioni reali.
+- Filtro 1° ordine (forma alpha)
+	d_filt[k] = d_filt[k-1] + alpha * (x[k] - d_filt[k-1]) con alpha = Ts/tf e x[k] la derivata grezza
+
+Nota importante: per stabilità numerica normalmente vogliamo 0 <= alpha <= 1. Quindi occorre TfD >= Ts per avere alpha <= 1. Se TfD < Ts, alpha>1 e la dinamica 
+				 può oscillare/instabilizzarsi. In pratica si sceglie TfD significativamente maggiore di Ts (es. 5..15 × Ts) o si usa alpha = Ts/(TfD + Ts) 
+				 (metodo equivalente con bilanciamento)
+
+Parametro da scegliere: la frequenza di taglio
+
+Con Ts = 1 ms, una scelta tipica è f_c = 5…20 Hz (tagli il rumore ma tieni utile la dinamica).
+Calcolo della costante di tempo del filtro:
+Tf = 1/(2pi f_c)
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+////////////////////////////////// In-position detection (banda posizione + velocità + dwell + isteresi) /////////////////////////////////////////
+Definisci una banda di tolleranza definita da due soglie di posizione (quando utilizziamo due soglie si parla di ISTERESI ed è utile perchè Senza isteresi (cioè se usi un’unica soglia), 
+quando l’errore oscilla vicino al limite, il flag cambierebbe stato continuamente - questo è il “toggling” o chattering) e, meglio ancora, aggiungi:
+- una soglia sulla velocità (per evitare di dichiarare “in target” mentre stai passando veloce),
+- un tempo di permanenza (dwell) nella banda, per filtrare rumore/jitter.
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+////////////////////////////////// SLEW RATE SULL'USCITA GENERATA DAL CONTROLLORE PID/////////////////////////////////////////
+Il slew-rate limit sull’uscita in Volt (quella che invii al motore) serve a limitare la pendenza du/dt così da evitare fronti ripidi di corrente nel motore e nel driver motore. 
+
+- Perché serve (in una riga di fisica)
+Per un motore DC:
+	di/dt = (u - (R*i + ke * omega))/L
+Quindi:	
+Se imponi un gradino di tensione u, la corrente i sale bruscamente con pendenza ~u/L (infatti allo stallo omega ~ 0) => limitando du/dt limitiamo implicitamente di/dt => riduciamo i picci di corrente, rumore e stress termico per il motore
+
+- Dove inserirlo nel PID
+Nel tuo loop, l’uscita passa per più trasformazioni. L’ordine robusto è:
+1) Calcoli PID 				-> u_unsat (Volt "ideali")
+2) Saturazione attuatore 	-> u_sat (rispetta +/- U_MAX_FWD/REV)
+3) Pre-enfasi deadzone 		-> u_pref (almeno +/- VDEAD per muovere il motore e vincere l'inerzia meccanica del sistema)
+4) Slew-rate limit 			-> u_act (ciò che davvero comandiamo nella iterazione corrente dal PID verso l'attuatore)
+5) Anti-windup bac-calc 	-> usa u_act nel termine Kaw(u_act - u_unsat) così l'integratore sa del rate-limit
+6) Azionamento motore		-> apply_motor_voltage(u_act)
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+////////////////////////////////// CODA DI STAMPA (per dubug)/////////////////////////////////////////
+Con ~25–35 caratteri per riga (es. TARGET=3448 VALUE=3449) a 50 Hz sei a ~1.5–2.0 kB/s, mentre 115200 bit/s ~ 11.5 kB/s di payload utile (8N1 ~ 10 bit/char).
+Il problema è che le tue stampe sono sincrone/bloccanti: per ogni carattere aspetti che l’hardware sia pronto (while ((sci->FLR & 0x4) == 0x4) {}), quindi il 
+main si ferma per ~86 µs/char. Quando per qualsiasi ragione il PC/driver USB/tty “tossisce” un attimo, il tuo loop accumula ritardo, poi “recupera” e ti 
+sembra un ingorgo che si sblocca all’improvviso.
+
+Soluzione al problema:
+
+Firmware RM57
+
+Obiettivo: spedire buffer (telemetria) senza busy-wait.
+Strategia: coda circolare (ring) in RAM + trasmissione a blocchi con sciSend() in modalità interrupt. La UART svuota i blocchi tramite la sua ISR; il ciclo a 1 kHz non resta mai appeso
+
+- Uart_TrySend() crea 8B = {hdr, target, value, crc} e chiama DrvSci_Write().
+- DrvSci_Write() accoda nel ring e, se idle, chiama sciSend() (HAL) che fa il kick del blocco.
+- La ISR HAL (sci3HighLevelInterrupt, case TX) invia i restanti byte; a fine blocco chiama sciNotification(), che lancia il blocco successivo se presente.
+
+Python (PC)
+
+Riceve lo stream grezzo, cerca 0xA55A, prende 8B LE, verifica XOR, spinge nei buffer, plotta.
+
+Quindi un frame firmware = una riga di grafico (due curve). L’header 0xA55A permette al parser di riallinearsi se parte a stream già avviato.
