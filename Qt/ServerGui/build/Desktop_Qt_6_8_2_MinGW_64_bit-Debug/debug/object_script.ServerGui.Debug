@@ -1,0 +1,12 @@
+debug/MyTcpServer.o
+debug/drawingarea.o
+debug/main.o
+debug/mainwindow.o
+debug/penmanager.o
+debug/usbmanager.o
+debug/usbstartconnection.o
+debug/moc_MyTcpServer.o
+debug/moc_drawingarea.o
+debug/moc_mainwindow.o
+debug/moc_penmanager.o
+debug/moc_usbmanager.o
