@@ -14,7 +14,7 @@ void IRef_Init(IRef* r){
     r->i_min_A          = -0.40f;   // 400mA
     r->i_max_A          = +0.40f;   // -400mA
     r->step_A           = 0.04f;    // 40mA
-    r->hold_ms_per_step = 1000;     /* 100ms per step*/
+    r->hold_ms_per_step = 1000;     // 100ms per step
     r->t_ticks_in_step  = 0;
     r->dir              = +1;
     r->i_now_A          = 0.0f;

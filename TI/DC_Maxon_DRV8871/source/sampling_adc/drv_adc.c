@@ -75,7 +75,7 @@ bool DrvAdc_ReadEnc_1kHz(AdcPos* out)
         s_enc1_ready  = 0u;                              // consume
 
         //NEW: Moving Average su posizione
-        /*uint16_t N      = (uint16_t)(1u << out->pos_ma_pow2);       // finestra di 2^c->cfg.pos_ma_pow2) campioni
+        uint16_t N      = (uint16_t)(1u << out->pos_ma_pow2);       // finestra di 2^c->cfg.pos_ma_pow2) campioni
         uint16_t old    = out->pos_buf[out->pos_idx];               // pos_buf è il ring. L’indice pos_idx punta alla cella da sovrascrivere (quindi è anche il campione “più vecchio” che esce dalla finestra)
         out->pos_buf[out->pos_idx] = s_last_enc1;                   // Scriviamo il nuovo campione nel ring
         out->pos_idx = (out->pos_idx + 1u) & out->pos_mask;         // wrap-around modulo N: quando l’indice raggiunge N, riparte da 0
@@ -91,7 +91,7 @@ bool DrvAdc_ReadEnc_1kHz(AdcPos* out)
         } else {
             // quando sei a regime (pos_fill == N): divisione per 2^p == right shift
             out->enc1_lsb = (uint16_t)(out->pos_acc >> out->pos_ma_pow2);
-        }*/
+        }
 
         return true;
     }

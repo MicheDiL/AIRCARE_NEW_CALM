@@ -6,7 +6,8 @@
  */
 
 #include "debug/drv_sci.h"
-
+#include "HL_gio.h"
+#include "HL_mibspi.h"
 
 /*============================ TX ring ============================ */
 static volatile uint8_t  s_tx_ring[SCI_TX_RING_SIZE];      // Buffer circolare di 512 byte (da 0 a 511) per la TX -> il buffer è pieno quando (head+1) % N == tail
@@ -115,6 +116,8 @@ void DrvSci_Init(void)
 {
     sciInit();                                   // HALCoGen setup (baud, frame, pinmux)
 
+    sciSetBaudrate(sciREGx, 1000000);           // con un VCLK1 di 75MHz equivale ad un baoud reale di 937500
+
     /* abilita IRQ TX + RX */
     sciEnableNotification(sciREGx, SCI_TX_INT);  // abilita TX interrupt
     sciEnableNotification(sciREGx, SCI_RX_INT);  // abilita RX interrupt
@@ -188,7 +191,7 @@ uint16_t DrvSci_Read(uint8_t* buf, uint16_t maxlen)
     while (n < maxlen) {
         uint8_t b;
         if (!rx_ring_get(&b)) break;    // prova a leggere ma se il ring RX è vuoto allora break
-        buf[n++] = b;                   // copia il byte
+        buf[n++] = b;                   // copia il byte dal ring buffer al buffer lineare buf
     }
     return n;                           // ritorna quanti byte sono stati letti nel ring RX
 }
@@ -208,6 +211,7 @@ void sciNotification(sciBASE_t *sci, uint32 flags)
            Con sciReceive() HALCoGen ti chiama quando il byte è stato ricevuto.
            Il byte è già in s_rx_byte. */
     if ((flags & SCI_RX_INT) != 0u) {
+        gioToggleBit(mibspiPORT5,PIN_SOMI_2);   // debug su DBG03
         (void)rx_ring_put(s_rx_byte); // parcheggio il byte ricevuto in sx_ring_put
 
         /* ri-arma subito per il prossimo byte da ricevere */
@@ -225,6 +229,7 @@ void sciNotification(sciBASE_t *sci, uint32 flags)
 
     /* TX: fine blocco -> consuma e kick successivo */
     if ((flags & SCI_TX_INT) != 0u) {
+        gioToggleBit(mibspiPORT5,PIN_SOMI_1);   // debug su DBG04
         /* Un blocco lanciato con sciSend() è appena finito: consumalo dal ring */
         if (s_tx_len_inflight) {
             tx_ring_consume(s_tx_len_inflight);    // togli dal ring il blocco appena inviato

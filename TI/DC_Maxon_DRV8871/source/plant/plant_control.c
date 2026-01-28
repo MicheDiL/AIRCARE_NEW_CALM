@@ -108,8 +108,8 @@ void PlantControl_Init(PlantControlCtx* c, const CtrlPidCfg* pidCfg, const Plant
     c->target                   = 0u;
 
     c->duty                     = 0.0f;
-    c->duty_freq                = 1.0f;    // 10Hz
-    c->duty_gain                = 0.08;     // 8%
+    c->duty_freq                = 2.0f;     // Hz
+    c->duty_gain                = 0.04f;      // %
     c->duty_sign                = 1;
     c->t_tick_in_step           = 0;
     c->hold_ms_per_step         = 10000;
@@ -225,7 +225,7 @@ void PlantSetDutyDir(PlantControlCtx* c){
 }
 void PlantSetDutyDir_Sine10Hz(PlantControlCtx* c)
 {
-    c->sin_phase += 2.0f*M_PI*c->duty_freq/10000.0f; //c->sin_dphi;
+    c->sin_phase += 2.0f*M_PI*c->duty_freq/10000.0f; //c->duty_freq è in Hz, 10000.0f è la frequenza di chiamata (10 kHz)
 
     if (c->sin_phase > 2.0f * M_PI) {
         c->sin_phase -= 2.0f * M_PI;
@@ -240,9 +240,7 @@ void PlantSetDutyDir_Sine10Hz(PlantControlCtx* c)
         c->direzione = 1;  // es. REV
     }
 
-    // Duty proporzionale al valore assoluto della funzione seno
-    float mag = fabsf(s);      // 0..1
-    c->duty = c->duty_gain * mag;
+    c->duty = c->duty_gain * s;
 }
 
 bool LimitCurrent_TRIPM1(PlantControlCtx* c){

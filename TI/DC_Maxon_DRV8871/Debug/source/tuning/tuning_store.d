@@ -13,6 +13,7 @@ source/tuning/tuning_store.obj: C:/ti/ccs1270/ccs/tools/compiler/ti-cgt-arm_20.2
 source/tuning/tuning_store.obj: C:/ti/ccs1270/ccs/tools/compiler/ti-cgt-arm_20.2.7.LTS/include/machine/_stdint.h
 source/tuning/tuning_store.obj: C:/ti/ccs1270/ccs/tools/compiler/ti-cgt-arm_20.2.7.LTS/include/sys/_stdint.h
 source/tuning/tuning_store.obj: C:/ti/ccs1270/ccs/tools/compiler/ti-cgt-arm_20.2.7.LTS/include/stdbool.h
+source/tuning/tuning_store.obj: C:/ti/ccs1270/ccs/tools/compiler/ti-cgt-arm_20.2.7.LTS/include/stddef.h
 
 ../source/tuning/tuning_store.c:
 
@@ -39,4 +40,6 @@ C:/ti/ccs1270/ccs/tools/compiler/ti-cgt-arm_20.2.7.LTS/include/machine/_stdint.h
 C:/ti/ccs1270/ccs/tools/compiler/ti-cgt-arm_20.2.7.LTS/include/sys/_stdint.h:
 
 C:/ti/ccs1270/ccs/tools/compiler/ti-cgt-arm_20.2.7.LTS/include/stdbool.h:
+
+C:/ti/ccs1270/ccs/tools/compiler/ti-cgt-arm_20.2.7.LTS/include/stddef.h:
 

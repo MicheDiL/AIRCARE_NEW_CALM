@@ -12,7 +12,7 @@ static volatile DecayMode s_mode = DECAY_BRAKE;  // default
 
 static inline float clamp01(float x)
 {
-    if (x < 0.0f) return 0.0f;
+    if (x < -1.0f/*0.0f*/) return -1.0f/*0.0f*/;
     if (x > 1.0f) return 1.0f;
     return x;
 }
@@ -120,7 +120,7 @@ void DrvPwm_Brake(void)
 
 void DrvPwm_Drive(ActDir dir, float duty01)
 {
-    float d = clamp01(duty01);
+    float d = clamp01(duty01);    // clamp di sicurezza sul dutycycle del segnale PWM
 
     if (s_mode == DECAY_COAST) {
        /* Schema attuale: drive-coast
@@ -131,9 +131,9 @@ void DrvPwm_Drive(ActDir dir, float duty01)
         * EPWMB = IN2
         */
        if (dir == ACT_DIR_FWD) {
-           DrvPwm_SetDutyRawAB(0.0f, d);
+           DrvPwm_SetDutyRawAB(0.0f, /*duty01*/d);
        } else {
-           DrvPwm_SetDutyRawAB(d, 0.0f);
+           DrvPwm_SetDutyRawAB(/*duty01*/d, 0.0f);
        }
    } else { // DECAY_BRAKE (schema TI)
        /* Serve una PWM attiva-bassa su una linea; siccome l’AQ genera attivo-alto,
@@ -141,7 +141,7 @@ void DrvPwm_Drive(ActDir dir, float duty01)
         * FWD: IN1=1 fisso, IN2=PWM(inv) -> alterni 10 (drive) e 11 (brake).
         * REV: speculare.
         */
-       float inv = 1.0f - d;   // genera il "PWM attivo-basso" usando il tuo PWM attivo-alto
+       float inv = 1.0f - fabs(/*duty01*/d);    // genera il "PWM attivo-basso" usando il tuo PWM attivo-alto
        if (dir == ACT_DIR_FWD) {
            DrvPwm_SetDutyRawAB(1.0f, inv);    // IN1=1 fisso, IN2=PWM alto(1-d)
        } else {

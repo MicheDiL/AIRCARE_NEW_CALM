@@ -21,6 +21,9 @@ source/debug/uart_to_qt.obj: C:/Users/mdilucchio/OneDrive\ -\ Fondazione\ Istitu
 source/debug/uart_to_qt.obj: C:/Users/mdilucchio/OneDrive\ -\ Fondazione\ Istituto\ Italiano\ Tecnologia/Desktop/DC_Maxon_DRV8871/include/HL_reg_gio.h
 source/debug/uart_to_qt.obj: C:/ti/ccs1270/ccs/tools/compiler/ti-cgt-arm_20.2.7.LTS/include/string.h
 source/debug/uart_to_qt.obj: C:/ti/ccs1270/ccs/tools/compiler/ti-cgt-arm_20.2.7.LTS/include/xlocale/_string.h
+source/debug/uart_to_qt.obj: C:/ti/ccs1270/ccs/tools/compiler/ti-cgt-arm_20.2.7.LTS/include/math.h
+source/debug/uart_to_qt.obj: C:/ti/ccs1270/ccs/tools/compiler/ti-cgt-arm_20.2.7.LTS/include/_defs.h
+source/debug/uart_to_qt.obj: C:/ti/ccs1270/ccs/tools/compiler/ti-cgt-arm_20.2.7.LTS/include/machine/_limits.h
 
 ../source/debug/uart_to_qt.c:
 
@@ -63,4 +66,10 @@ C:/Users/mdilucchio/OneDrive\ -\ Fondazione\ Istituto\ Italiano\ Tecnologia/Desk
 C:/ti/ccs1270/ccs/tools/compiler/ti-cgt-arm_20.2.7.LTS/include/string.h:
 
 C:/ti/ccs1270/ccs/tools/compiler/ti-cgt-arm_20.2.7.LTS/include/xlocale/_string.h:
+
+C:/ti/ccs1270/ccs/tools/compiler/ti-cgt-arm_20.2.7.LTS/include/math.h:
+
+C:/ti/ccs1270/ccs/tools/compiler/ti-cgt-arm_20.2.7.LTS/include/_defs.h:
+
+C:/ti/ccs1270/ccs/tools/compiler/ti-cgt-arm_20.2.7.LTS/include/machine/_limits.h:
 

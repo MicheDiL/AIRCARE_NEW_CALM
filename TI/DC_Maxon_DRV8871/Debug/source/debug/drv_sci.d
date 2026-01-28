@@ -18,6 +18,9 @@ source/debug/drv_sci.obj: C:/Users/mdilucchio/OneDrive\ -\ Fondazione\ Istituto\
 source/debug/drv_sci.obj: C:/Users/mdilucchio/OneDrive\ -\ Fondazione\ Istituto\ Italiano\ Tecnologia/Desktop/DC_Maxon_DRV8871/include/HL_sys_common.h
 source/debug/drv_sci.obj: C:/Users/mdilucchio/OneDrive\ -\ Fondazione\ Istituto\ Italiano\ Tecnologia/Desktop/DC_Maxon_DRV8871/include/HL_hal_stdtypes.h
 source/debug/drv_sci.obj: C:/Users/mdilucchio/OneDrive\ -\ Fondazione\ Istituto\ Italiano\ Tecnologia/Desktop/DC_Maxon_DRV8871/include/HL_reg_gio.h
+source/debug/drv_sci.obj: C:/Users/mdilucchio/OneDrive\ -\ Fondazione\ Istituto\ Italiano\ Tecnologia/Desktop/DC_Maxon_DRV8871/include/HL_gio.h
+source/debug/drv_sci.obj: C:/Users/mdilucchio/OneDrive\ -\ Fondazione\ Istituto\ Italiano\ Tecnologia/Desktop/DC_Maxon_DRV8871/include/HL_mibspi.h
+source/debug/drv_sci.obj: C:/Users/mdilucchio/OneDrive\ -\ Fondazione\ Istituto\ Italiano\ Tecnologia/Desktop/DC_Maxon_DRV8871/include/HL_reg_mibspi.h
 
 ../source/debug/drv_sci.c:
 
@@ -54,4 +57,10 @@ C:/Users/mdilucchio/OneDrive\ -\ Fondazione\ Istituto\ Italiano\ Tecnologia/Desk
 C:/Users/mdilucchio/OneDrive\ -\ Fondazione\ Istituto\ Italiano\ Tecnologia/Desktop/DC_Maxon_DRV8871/include/HL_hal_stdtypes.h:
 
 C:/Users/mdilucchio/OneDrive\ -\ Fondazione\ Istituto\ Italiano\ Tecnologia/Desktop/DC_Maxon_DRV8871/include/HL_reg_gio.h:
+
+C:/Users/mdilucchio/OneDrive\ -\ Fondazione\ Istituto\ Italiano\ Tecnologia/Desktop/DC_Maxon_DRV8871/include/HL_gio.h:
+
+C:/Users/mdilucchio/OneDrive\ -\ Fondazione\ Istituto\ Italiano\ Tecnologia/Desktop/DC_Maxon_DRV8871/include/HL_mibspi.h:
+
+C:/Users/mdilucchio/OneDrive\ -\ Fondazione\ Istituto\ Italiano\ Tecnologia/Desktop/DC_Maxon_DRV8871/include/HL_reg_mibspi.h:
 
