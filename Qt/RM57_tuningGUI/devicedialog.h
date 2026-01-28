@@ -13,6 +13,8 @@ Filosofia adottata: follow live quando l'utente non sta esplorando, freeze quand
 #include <QPushButton>
 #include <QLabel>
 #include <QHBoxLayout>
+#include <array>
+#include <QComboBox>
 
 namespace Ui { class DeviceDialog; }
 
@@ -27,7 +29,11 @@ public:
 
     void appendTelemetryBatch(const QVector<TelemetrySample>& batch); // aggiunge punti e aggiorna lastT
 
-public slots:
+signals:
+    /* Ricorda: questi slot sono frutto di connessioni fra thread (ovvero Qt:QueuedConnection) quindi se usiamo dei tipi
+     definiti da noi (ad. es enum) bisogna fare la registrazione nel meta-type system (cosa che abbiamo fatto in protocol.h e main.cpp)*/
+    void recordToggled(TelemetryType type, bool enabled);       // segnale che devicedialog manda a serialworker per avviare il log dello streaming
+    void logDirChanged(const QString dir);  // passiamo la stringa della directory (il const promette di non modificare il parametro in ingresso alla funzione)
 
 private:
     Ui::DeviceDialog* ui = nullptr;     // puntatore alla UI generata da Qt Designer
@@ -51,18 +57,38 @@ private:
 
     QHash<QCustomPlot*, PlotState> _plotState;
 
-    #ifndef MCU_SIM_RUN
+    //////////
+    // --- streaming rate estimation ---
+    QElapsedTimer _rateWall;
+    qint64 _rateLastMs = 0;
+
+    quint64 _framesCount = 0;                 // quanti TelemetrySample hai ricevuto (tipicamente 8 per tick)
+    std::array<quint64, 8> _curveCount{};     // 4 type * 2 id = 8 curve
+
+    // contatori frames (PRIMA TIPOLOGIA DI PROTOCOLLO DI STREAMING UART)
+    double _framesHz = 0.0;
+    double _ticksHz  = 0.0;
+    // contatori tick (SECONDA TIPOLOGIA DI PROTOCOLLO DI STREAMING UART)
+    quint64 _tickCount = 0;
+    qint64 _lastTickKeyMs = -1;
+
+    std::array<double, 8> _curveHz{};         // stima degli Hz per curva
+
+    void updateRatesIfDue();                  // calcola ogni periodo di ~1s
+    double curveHzForPlot(TelemetryType t) const; // max(id0,id1) per quel tipo
+    //////////
+
     /* timer GUI (es. 16 ms, Precise) fa:
      * - scorrere l’asse X con un tempo continuo (non a gradini)
      * - replot a frequenza costante (60 Hz)*/
     double _lastT = 0.0;         // ultimo tSec ricevuto (telemetria)
-    QElapsedTimer _wall;         // clock GUI (monotonic)
+    QElapsedTimer _wall;         // clock GUI
     qint64 _lastWallMs = 0;      // wall-time del momento in cui è arrivato l’ultimo batch/sample
 
     double tDisplayNow() const;  // _lastT + delta_wall
 
     // ===== Due timer: FAST vs SLOW =====
-    QTimer _timerFast;           // 16 ms: scroll + replot
+    QTimer _timerFast;           // 16 ms: scroll + replot: anche se i batch arrivano “a scatti” (ogni 33ms), tu vuoi che l’asse X scorra fluido (≈ 60 fps)
     QTimer _timerSlow;           // 100-200 ms: trim/limit/autoscale
 
     // ===== Pulsanti per interattività plot =====
@@ -70,7 +96,11 @@ private:
     void forceLive(QCustomPlot* p);         // rimette un plot in live
     void forceLiveAll();                    // rimette tutti i plot in live
     double liveTimeNow() const;             // tempo da usare per riallineare gli assi
-    #endif
+
+    // ===== Menu per slezione directory file log ======
+    QComboBox* _cmbLogDir = nullptr;
+    QString _logDir;            // percorso della directory di log
+    void installTopLogDirBar(); // è la funzione che costruisce la UI top bar per selezionare la directory di log
 };
 
 #endif // DEVICEDIALOG_H

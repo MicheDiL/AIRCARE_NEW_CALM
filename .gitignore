@@ -1,0 +1,20 @@
+# ==== Qt / Qt Creator ====
+*.pro.user
+.qtc_clangd/
+compile_commands.json
+
+# ==== Build ====
+build/
+*/build-*/
+
+# ==== Binary / object ====
+*.exe
+*.o
+*.obj
+
+# ==== Qt generated ====
+moc_*.cpp
+ui_*.h
+
+# ==== Runtime data ====
+*.csv

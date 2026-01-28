@@ -60,3 +60,8 @@ Così la GUI riceve tipo:
 anziché
 
 500–5000 aggiornamenti al secondo (satura)
+
+PICCOLO MIGLIORAMENTO:
+Ad ora basta cliccare su connect per cambiare lo stato della connessione in "Connected".
+La cosa migliore da fare sarebbe mettere un ACK da RM57 verso Qt t.c se ci sta ACK premendo
+su connect allora fare cambiare lo stato della connessione in "Connected".

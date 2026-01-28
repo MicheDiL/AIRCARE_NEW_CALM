@@ -1,13 +1,19 @@
 #include "devicedialog.h"
 #include "ui_devicedialog.h"
 #include "plotzoomdialog.h"
-
 #include <QToolButton>
 #include <QHBoxLayout>
 #include <QPixmap>
 #include <QIcon>
 #include <cmath>   // std::ceil
 #include <QtGlobal> // qBound
+
+#include <QStandardPaths>
+#include <QDir>
+#include <QFileDialog>
+#include <QVBoxLayout>
+#include <QLabel>
+#include <QSettings>
 /*********************************************************************************************************************
  *                                                  HELPERS
 **********************************************************************************************************************/
@@ -139,18 +145,23 @@ DeviceDialog::DeviceDialog(QWidget *parent)
     : QDialog(parent), ui(new Ui::DeviceDialog)
 {
     ui->setupUi(this);
+    installTopLogDirBar();
     setWindowTitle("CALM Monitoring");
 
     // ogni plot viene configurato ugualmente (2 curve + assi) e cambia solo la label Y
     setupPlot(ui->plotDuty,     "Duty [%]");
     setupPlot(ui->plotCurrents, "Current [mA]");
     setupPlot(ui->plotVoltages, "Voltage [V]");
-    setupPlot(ui->plotPosition, "Position [deg]");
+    setupPlot(ui->plotPosition, "Position [V]");
 
-    #ifndef MCU_SIM_RUN
     // Avvia clock per tempo "continuo" (asse X fluido)
     _wall.start();
     _lastWallMs = _wall.elapsed();
+
+    //////////
+    _rateWall.start();
+    _rateLastMs = _rateWall.elapsed();
+    //////////
 
     // ===== Timer FAST: 16ms solo scroll X + replot =====
     _timerFast.setInterval(16);
@@ -185,11 +196,6 @@ DeviceDialog::DeviceDialog(QWidget *parent)
         const double xMax = t;
         const double xMin = t - _windowSec;
 
-        // Telemetria per curva a 50 Hz (period_ms=20)
-        // Idealmente period_ms lo passi da MainWindow o lo tieni come costante configurabile.
-        static constexpr int period_ms = 20;        // POSSIBILE MIGLIORIA: aggiungere il tuning di period_ms da GUI
-        const double fCurveHz = 1000.0 / period_ms; // POSSIBILE MIGLIORIA: stimiamo fCurveHz misurando realmente la frequenza che arriva (contatori per type/id in finestra mobile)
-
         for(QCustomPlot* p : allPlots(ui))
         {
             const bool override =
@@ -200,6 +206,22 @@ DeviceDialog::DeviceDialog(QWidget *parent)
             const double trimFactor = override ? 3.0 : 1.2;
 
             trimOld(p, t, _windowSec, trimFactor);
+
+            //////////
+            /* Quanto tagliare? Dipende dalla frequenza reale di arrivo (che può cambiare se cambi s_period_ms).
+            → quindi tu stimi la frequenza “reale” nel dialog e poi calcoli maxPts coerente con _windowSec.*/
+            TelemetryType type{};
+            if(p == ui->plotDuty) type = TelemetryType::Duty;
+            else if(p == ui->plotCurrents) type = TelemetryType::Current;
+            else if(p == ui->plotVoltages) type = TelemetryType::Voltage;
+            else type = TelemetryType::Position;
+
+            double fCurveHz = curveHzForPlot(type); // calcola la frequenza di telemetria dai dati che arrivano da RM57
+
+            // fallback: se ancora non hai stime (all'avvio), assumi un valore ragionevole
+            if(fCurveHz <= 1e-3)
+                fCurveHz = 50.0; // oppure 100.0
+            ///////////
 
             // maxPts coerente con quanto stai cercando di tenere
             const int maxPts = computeMaxPts(_windowSec, fCurveHz, trimFactor, 1.5);
@@ -212,7 +234,6 @@ DeviceDialog::DeviceDialog(QWidget *parent)
         // Niente replot qui: lo fa già il FAST timer
     });
     _timerSlow.start();
-    #endif
 
     setWindowFlags(windowFlags()
                    | Qt::WindowMinimizeButtonHint
@@ -263,21 +284,38 @@ void DeviceDialog::appendTelemetryBatch(const QVector<TelemetrySample>& batch)
 {
     if(batch.isEmpty()) return;
 
-    #if MCU_SIM_RUN
-    double lastT = 0.0;
-    #endif
+    //////////
+    // Nel caso della PRIMA TIPOLOGIA DI PROTOCOLLO DI STREAMING rappresenta il numero di FRAME che arrivano nel periodo
+    // Nel caso della SECONDA TIPOLOGIA DI PROTOCOLLO DI STREAMING rappresenta il numero di curve/sample che voglio aggiornare
+    _framesCount += batch.size();
+    //////////
 
     for(const auto& s : batch)
     {
-        #if MCU_SIM_RUN
-        lastT = s.tSec;
-        #else
-        _lastT = s.tSec;  // tieni l’ultimo tempo visto
-        #endif
+        _lastT = s.tSec;  // aggiorna il tempo dell'ultimo batch ricevuto (MCU time)
+
+        ///////////////////////// SECONDA TIPOLOGIA DI PROTOCOLLO DI STREAMING /////////////////////////////
+        // Conta i tick reali: riconoscere un tick quando cambia tSec
+        // Converti tSec in "chiave ms" robusta (evita problemi float tipo 0.005 -> 0.0049999)
+        const qint64 tickKeyMs = qint64(std::llround(s.tSec * 1000.0));
+        // Se è cambiata la chiave temporale, è arrivato un nuovo burst/tick
+        if (tickKeyMs != _lastTickKeyMs) {
+            _lastTickKeyMs = tickKeyMs;
+            _tickCount++;
+        }
+        ///////////////////////////////////////////////////////////////////////////////////////////////////
+
+        // contatori curve
+        const int idx = int(s.type)*2 + (s.id ? 1 : 0);
+        if(idx>=0 && idx <8){
+            _curveCount[idx]++; // conta quanti sample per singola curva (8 curve)
+        }
+
 
         QCustomPlot* p = plotForType(s.type);
         if(!p) continue;
 
+        // scegli quale curva (graph) in base a id
         const int gi = (s.id == 0) ? 0 : 1;
         if(gi >= p->graphCount()) continue;
 
@@ -286,45 +324,10 @@ void DeviceDialog::appendTelemetryBatch(const QVector<TelemetrySample>& batch)
         // Risolviamo questo potenziale problema con gli helper trimOld() e limitMaxPoints()
     }
 
-
-    #if MCU_SIM_RUN
-    // Autoscroll X (una volta sola, non per punto)
-    ui->plotDuty->xAxis->setRange(lastT, _windowSec, Qt::AlignRight);
-    ui->plotCurrents->xAxis->setRange(lastT, _windowSec, Qt::AlignRight);
-    ui->plotVoltages->xAxis->setRange(lastT, _windowSec, Qt::AlignRight);
-    ui->plotPosition->xAxis->setRange(lastT, _windowSec, Qt::AlignRight);
-
-    // Taglia i dati vecchi: evita crescita infinita (memoria + tempo replot)
-    trimOld(ui->plotDuty,     lastT, _windowSec, 1.2);
-    trimOld(ui->plotCurrents, lastT, _windowSec, 1.2);
-    trimOld(ui->plotVoltages, lastT, _windowSec, 1.2);
-    trimOld(ui->plotPosition, lastT, _windowSec, 1.2);
-
-    // Guardrail max points
-    static constexpr int kMaxPts = 2000;
-    for(QCustomPlot* p : {ui->plotDuty, ui->plotCurrents, ui->plotVoltages, ui->plotPosition})
-        limitMaxPoints(p, kMaxPts);
-
-    // Autoscale Y solo se non override utente
-    const double xMax = lastT;
-    const double xMin = lastT - _windowSec;
-    for(QCustomPlot* p : {ui->plotDuty, ui->plotCurrents, ui->plotVoltages, ui->plotPosition})
-    {
-        auto it = _plotState.find(p);
-        const bool override = (it != _plotState.end()) ? it->userOverride : false;
-        if(!override)
-            autoscaleYVisible(p, xMin, xMax);
-    }
-
-    // Replot una volta per plot (queued)
-    ui->plotDuty->replot(QCustomPlot::rpQueuedReplot);
-    ui->plotCurrents->replot(QCustomPlot::rpQueuedReplot);
-    ui->plotVoltages->replot(QCustomPlot::rpQueuedReplot);
-    ui->plotPosition->replot(QCustomPlot::rpQueuedReplot);
-    #else
     // reset “punto di ancoraggio” del tempo continuo
     _lastWallMs = _wall.elapsed();
-    #endif
+
+    updateRatesIfDue();
 }
 
 void DeviceDialog::setupPlot(QCustomPlot* p, const QString& yLabel)
@@ -382,6 +385,60 @@ void DeviceDialog::setupPlot(QCustomPlot* p, const QString& yLabel)
     });
 
 }
+
+/////////
+void DeviceDialog::updateRatesIfDue()
+{
+    /* Nella PRIMA TIPOLOGIA DI PROTOCOLLO DI STREAMING UART:
+        - misura ogni ~1s quanti TelemetrySample sono arrivati (_framesCount)
+        - stima _framesHz = _framesCount/dt
+        - stima _ticksHz = _framesHz/8 assumendo che arrivino sempre 8 sample per tick
+       Nella SECONDA TIPOLOGIA DI PROTOCOLLO DI STREAMING UART:
+        - conta i tick reali (quanti burst distinti sono arrivati)
+    */
+
+    const qint64 now = _rateWall.elapsed();
+    const qint64 dtMs = now - _rateLastMs;
+
+    // aggiorna ogni ~1000ms (puoi anche 500ms)
+    if(dtMs < 1000)
+        return;
+
+    const double dt = dtMs / 1000.0;
+
+    _framesHz = _framesCount / dt;  // “Hz” dei sample che arrivano a DeviceDialog
+
+    ///////////// PRIMA TIPOLOGIA DI PROTOCOLLO DI STREAMING UART //////////////////
+    //_ticksHz  = _framesHz / 8.0;    // assume 8 frame per tick
+    //////////// SECONDA TIPOLOGIA DI PROTOCOLLO DI STREAMING UART ////////////////
+    // tick rate misurato contando i burst reali
+    _ticksHz  = _tickCount / dt;
+    //////////////////////////////////////////////////////////////////////////////
+
+    for(int i=0;i<8;i++){
+        _curveHz[i] = _curveCount[i] / dt; // Hz per curva
+        _curveCount[i] = 0;
+    }
+
+    _framesCount = 0;
+    _rateLastMs = now;
+    _tickCount   = 0;
+
+    // (opzionale) qui potresti aggiornare una label di status tipo:
+    // ui->lblRate->setText(QString("frames=%1 Hz, ticks=%2 Hz").arg(_framesHz,0,'f',1).arg(_ticksHz,0,'f',1));
+}
+
+double DeviceDialog::curveHzForPlot(TelemetryType t) const
+{
+    const int base = int(t)*2;
+    if(base < 0 || base+1 >= 8) return 0.0;
+
+    const double h0 = _curveHz[base + 0];
+    const double h1 = _curveHz[base + 1];
+
+    return std::max(h0, h1);
+}
+////////
 
 QCustomPlot* DeviceDialog::plotForType(TelemetryType t) const
 {
@@ -458,6 +515,24 @@ void DeviceDialog::installLiveButtons() // funziona perché nel tuo .ui ci sono 
         "  background: #D0D0D0;"
         "}";
 
+    const QString kRecBtnStyle =
+        "QPushButton {"
+        "  background: #F3F3F3;"
+        "  border: 1px solid #BDBDBD;"
+        "  border-radius: 6px;"
+        "  padding: 4px 10px;"
+        "  color: #202020;"
+        "}"
+        "QPushButton:hover { background: #E9E9E9; }"
+        "QPushButton:checked {"
+        "  background: #D32F2F;"     // rosso REC ON
+        "  border: 1px solid #8E1E1E;"
+        "  color: white;"
+        "  font-weight: 700;"
+        "}"
+        "QPushButton:checked:hover { background: #C62828; "
+        "}";
+
     // ---------- Pulsante globale in alto per riallineare tutti i plot in modalità live ----------
     /*{
         auto* row = new QHBoxLayout();
@@ -480,7 +555,9 @@ void DeviceDialog::installLiveButtons() // funziona perché nel tuo .ui ci sono 
     }*/
 
     // ---------- Pulsanti per-plot (uno per groupbox) ----------
-    auto addBtn = [this, &kLiveBtnStyle](QVBoxLayout* boxLayout, QCustomPlot* plot, const QString& tip)
+    /* Lambda function di tipo anonimo -> aouto lo deduce
+     [...] è la lista di cattura della lambda ovvero cosa la lambda conoscerà dall'esterno */
+    auto addBtn = [this, &kLiveBtnStyle, &kRecBtnStyle](QVBoxLayout* boxLayout, QCustomPlot* plot, TelemetryType type, const QString& tip)
     {
         if(!boxLayout || !plot) return;
 
@@ -499,16 +576,26 @@ void DeviceDialog::installLiveButtons() // funziona perché nel tuo .ui ci sono 
         row->addStretch();
 
         // Bottone LIVE (grigio chiaro)
-        auto* btnLive = new QPushButton("LIVE", header);
+        auto* btnLive = new QPushButton("LIVE", header);    // figlio di header che è il parent
         btnLive ->setStyleSheet(kLiveBtnStyle);
         btnLive ->setToolTip(tip);
         btnLive ->setAutoDefault(false);
         btnLive ->setFixedHeight(22);
         btnLive ->setMaximumWidth(60);
 
+        // Creo un bottone e lo rendo toggle
+        auto* btnRec = new QPushButton("REC", header);  // figlio di header che è il parent
+        btnRec->setStyleSheet(kRecBtnStyle);
+        btnRec->setToolTip("Start/Stop recording su file per questo plot");
+        btnRec->setAutoDefault(false);
+        btnRec->setFixedHeight(22);
+        btnRec->setMaximumWidth(60);
+        btnRec->setCheckable(true); // così rendo toggle il bottone creato
+
         // Metti il pulsante prima del plot, allineato a destra
         //boxLayout->insertWidget(0, btn, 0, Qt::AlignRight);
         row->addWidget(btnLive);
+        row->addWidget(btnRec);
 
         // Inserisci header come primo elemento del groupbox layout (sopra al plot)
         boxLayout->insertWidget(0, header, 0);
@@ -537,16 +624,172 @@ void DeviceDialog::installLiveButtons() // funziona perché nel tuo .ui ci sono 
             plot->replot(QCustomPlot::rpQueuedReplot);
         };
 
-        connect(tMeasure, &QToolButton::toggled, this, [=](bool on){ applyVis(0, on); });
-        connect(tTarget,  &QToolButton::toggled, this, [=](bool on){ applyVis(1, on); });
+        // connessioni che collegano i bottoni creati a una lamda function
+        connect(tMeasure, &QToolButton::toggled, this, [=](bool on){
+            applyVis(0, on);
+        });
+        connect(tTarget,  &QToolButton::toggled, this, [=](bool on){
+            applyVis(1, on);
+        });
+        /* la capture list delle lamda delle due connessioni è [=] perchè sta a significare:
+         tutto quello che la lambda usa dentro di sè, sta già fuori (visto che applyVis è a sua volta
+         una lambda definita poco sopra) => la lambda della connessione prende tutto per valore =>
+         in questo caso la lambda collegata al segnale si porta dentro una copia di applyVis per valore
+         e quindi indirettamente anche di tutto ciò che applyVis a sua volta si portava dentro essendo essa una lambda.
+        */
 
-        connect(btnLive, &QPushButton::clicked, this, [this, plot]{
+        connect(btnLive,  &QPushButton::clicked, this, [this, plot]{
             forceLive(plot);
+        });
+        connect(btnRec, &QPushButton::toggled,   this, [this, type](bool on){   // "on" viene dal metodo toggled(bool)
+            emit recordToggled(type, on);
         });
     };
 
-    addBtn(ui->vboxDuty,     ui->plotDuty,     "Return to live view (Duty)");
-    addBtn(ui->vboxCurrents, ui->plotCurrents, "Return to live view (Currents)");
-    addBtn(ui->vboxVoltages, ui->plotVoltages, "Return to live view (Voltages)");
-    addBtn(ui->vboxPosition, ui->plotPosition, "Return to live view (Position)");
+    addBtn(ui->vboxDuty,     ui->plotDuty,     TelemetryType::Duty,       "Return to live view (Duty)");
+    addBtn(ui->vboxCurrents, ui->plotCurrents, TelemetryType::Current,    "Return to live view (Currents)");
+    addBtn(ui->vboxVoltages, ui->plotVoltages, TelemetryType::Voltage,    "Return to live view (Voltages)");
+    addBtn(ui->vboxPosition, ui->plotPosition, TelemetryType::Position,   "Return to live view (Position)");
+}
+
+// Crea barra per selzione directory di log
+void DeviceDialog::installTopLogDirBar()
+{
+    // Determina una directory di default del tipo C:\Users\<utente>\Documents\CALM_Logs
+    const QString docs = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation); // QStandardPaths è la utility Qt che sa dove sono le cartelle “canoniche” sul sistema dell’utente
+    const QString def  = QDir(docs).filePath("CALM_Logs");
+
+    // Carica ultima directory salvata
+    {
+        QSettings s;
+        const QString last = s.value("log/dir", def).toString();
+        _logDir = last.isEmpty() ? def : last;
+    }
+
+    // Crea widget barra + layout orizzontale
+    auto* bar = new QWidget(this);      // bar è figlio di this (ovvero di devicedialog)
+    auto* row = new QHBoxLayout(bar);   // row figlio di bar
+    row->setContentsMargins(0, 0, 0, 0);
+    row->setSpacing(10);
+
+    auto* lbl = new QLabel("Log directory:", bar);
+
+    _cmbLogDir = new QComboBox(bar);
+    _cmbLogDir->setMinimumWidth(60);
+
+    // Determina una directory di default del tipo C:\Users\<utente>\Desktop
+    const QString desktop = QStandardPaths::writableLocation(QStandardPaths::DesktopLocation);
+    // Determina una directory di default del tipo C:\Users\<utente>\Temp
+    const QString temp    = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+
+    // Popolamento della combo con testo + costruzione dell'intero percorso in cui fare il log
+    _cmbLogDir->addItem("Documents/CALM_Logs", def);    // il secondo argomento di addItem è lo userData
+    _cmbLogDir->addItem("Desktop", desktop);
+    _cmbLogDir->addItem("Temp", temp);
+    /* Quindi abbiamo 3 item con i rispettivi userData associati */
+
+    // Inserisco anche l'attuale _logDir se non coincide con i preset
+    if (_cmbLogDir->findData(_logDir) < 0) {
+        _cmbLogDir->insertItem(0, _logDir, _logDir);
+    }
+
+    // Item speciale “Browse...”: userData vuoto come sentinel
+    _cmbLogDir->addItem("Browse...", QString());    // lo userData è una stringa vuota
+
+    // Cerca l'indice dell'item il cui userData è _logDir e lo impostiamo come quello scelto dall'utente
+    _cmbLogDir->setCurrentIndex(_cmbLogDir->findData(_logDir));
+
+    // Aggiungiamo la label che mostra la directory selezionata per intero
+    auto* lblPath = new QLabel(_logDir, bar);
+    lblPath->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    lblPath->setStyleSheet("color:#404040;");
+
+    row->addWidget(lbl);
+    row->addWidget(_cmbLogDir, 1);  // a comboBox _cmbLogDir con stretch factor 1
+    row->addWidget(lblPath, 2);     // il path ha più “peso” in larghezza rispetto alla comboBox: sensato perché un path può essere lungo
+
+    // Inserisci la barra in cima al layout principale del dialog
+    //    Caso tipico: root layout è un QVBoxLayout
+    if (auto* v = qobject_cast<QVBoxLayout*>(this->layout())) {
+        v->insertWidget(0, bar);
+    } else {
+        // fallback: se root non è VBox, creiamo un VBox wrapper
+        auto* old = this->layout();
+        auto* wrapper = new QVBoxLayout();
+        wrapper->setContentsMargins(10, 10, 10, 10);
+        wrapper->setSpacing(10);
+        wrapper->addWidget(bar);
+
+        if (old) {
+            // “impacchetto” il vecchio layout dentro un widget
+            auto* oldHost = new QWidget(this);
+            oldHost->setLayout(old);
+            wrapper->addWidget(oldHost, 1);
+        }
+        this->setLayout(wrapper);
+    }
+
+    // GESTIONE CASO IN CUI UTENTE CAMBIA DIRECTORY DOPO AVER AVVIATO REGISTRAZIONE: cambio selezione -> aggiorna directory e notifica serialworker
+    connect(_cmbLogDir, &QComboBox::currentIndexChanged, this, [this, lblPath](int idx){
+        /* nella capture list della lambda ci sta:
+            - this per accedere a _cmbLogDir, _logDir, emit, ecc
+            - lblPath per aggiornare la label
+        */
+        const QString data = _cmbLogDir->itemData(idx).toString();  // prende lo userData dal nuovo item selezionato dall'utente e lo convertiamo in una QString
+
+        // Se il nuovo item selezionato dall'utente è Browse...
+        if (_cmbLogDir->itemText(idx) == "Browse...") {
+            // setta la directory di partenza se il nuovo item selezionato è "Browse..."
+            const QString start = _logDir.isEmpty() ? QDir::homePath() : _logDir; // se _logDir non è settata parti da Home
+            const QString dir = QFileDialog::getExistingDirectory(this, "Select log directory", start);
+
+            if (dir.isEmpty()) {
+                // rollback alla dir corrente
+                const int back = _cmbLogDir->findData(_logDir);
+                if (back >= 0) _cmbLogDir->setCurrentIndex(back);
+                return;
+            }
+
+            // Applica nuova directory e creala
+            _logDir = dir;
+            QDir().mkpath(_logDir);
+
+            // se non esiste come item, aggiungilo in cima
+            int existing = _cmbLogDir->findData(_logDir);
+            if (existing < 0) {
+                _cmbLogDir->insertItem(0, _logDir, _logDir);
+                existing = 0;
+            }
+            _cmbLogDir->setCurrentIndex(existing);
+
+            lblPath->setText(_logDir); // Aggiorna label path
+
+            // persisti (opzionale)
+            QSettings s;
+            s.setValue("log/dir", _logDir);
+
+            // Notifica il serialworker
+            emit logDirChanged(_logDir);
+
+            return;
+        }
+
+        // Preset normale
+        if (!data.isEmpty()) {
+            _logDir = data;
+            QDir().mkpath(_logDir);
+
+            lblPath->setText(_logDir);
+
+            // persisti (opzionale)
+            QSettings s;
+            s.setValue("log/dir", _logDir);
+
+            emit logDirChanged(_logDir);
+        }
+    });
+
+    // 7) emetti subito il valore iniziale (così worker è allineato)
+    QDir().mkpath(_logDir);
+    emit logDirChanged(_logDir);
 }

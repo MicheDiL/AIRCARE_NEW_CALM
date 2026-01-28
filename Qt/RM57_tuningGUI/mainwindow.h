@@ -21,7 +21,6 @@ Perché serve:
 #include "mcusimworker.h"
 #endif
 
-
 QT_BEGIN_NAMESPACE
 namespace Ui {
 class MainWindow;
@@ -53,7 +52,7 @@ private slots:
 
     // Worker -> GUI
     void onWorkerConnected(bool ok, QString reason);
-    void onTelemetryBatch(QVector<TelemetrySample> batch);
+    void onTelemetryBatch(const QVector<TelemetrySample> batch);
 
     // Debounce
     void scheduleSendTuning();   // chiamata dai valueChanged
@@ -62,9 +61,17 @@ private slots:
 private:
     Ui::MainWindow *ui = nullptr;
 
-    //============== BEGIN: NUOVE MODIFICHE =============
-    DutyCfg _dutyCfg;
-    // ============= END: NUOVE MODIFICHE ==============
+    #ifdef ADD_FUNCTIONS_TO_GUI
+        SignalConfig  _sig[4]; // 0 Duty, 1 Current, 2 Position, 3 Voltage
+
+        // Quando cambi forma, riempi i campi della pagina visibile con i valori memorizzati nella struct
+        // Risultato: cambi forma e ritrovi gli ultimi valori usati per quella forma
+        void applyDutyUiFromConfig();
+        void applyCurUiFromConfig();
+        void applyPosUiFromConfig();
+        //void applyVoltUiFromConfig();
+
+    #endif
 
     // Thread + Worker
     QThread* _ioThread = nullptr;

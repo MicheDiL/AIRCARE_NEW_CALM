@@ -23,6 +23,12 @@ e affinità corretta degli oggetti Qt
 // Nel worker aggiungi una coda e un timer di flush
 #include <QVector>
 #include <QTimer>
+// Facciamo il log dei dati di telemetria per analisi offline
+#include <QFile>
+#include <QTextStream>
+#include <QDateTime>
+#include <QDir>
+#include <QStandardPaths>
 
 class SerialWorker : public QObject
 {
@@ -39,6 +45,11 @@ public slots:
     void writeBytes(const QByteArray& data);        // tuning verso MCU
     void startBatching();   // avvia il timer nel thread del worker
     void stopBatching();    // opzionale
+
+    // Slot per il log
+    void setLogDirectory(const QString& dir);   // Slot chiamato nel caso in cui l'utente cambi la directory di log durante una registrazione in corso
+    void setRecording(TelemetryType type, bool enabled);
+
 signals:
     // eventi verso la GUI
     void connectedChanged(bool ok, QString reason);      // notifica a MainWindow se connessione è ok oppure fallita (con reason)
@@ -52,6 +63,9 @@ private:
     QByteArray _rx;              // buffer di ricezione (stream UART)
     QElapsedTimer _t0;           // per dare un timestamp relativo PC ai campioni (utile per il plot)
 
+    /*****************************************************************************/
+    /* L'idea è che invece di mandare alla GUI ogni singolo pacchetto di TelemetrySample parsato da serialworker,
+     i pacchetti di TelemtrySAmple parsati vengono accumulati in una coda _pending e poi mandati ogni X ms */
     QVector<TelemetrySample> _pending; // contenitore in cui accumulo la coda di campioni “non ancora inviati” al thread GUI per il plot
 
     QTimer* _flushTimer = nullptr;     // scandisce l’invio batch dei campioni. Questo QTimer lo creiamo e lo startiamo dentro uno slot che viene eseguito nel thread del worker
@@ -64,10 +78,28 @@ private:
     */
     void flushNow();
     int _flushMaxSamples = 300;      // SOGLIA: flush immediato se superi N sample. Miglioramento possibile: renderlo "adattivo” in base a baud/txInterval
+    /*****************************************************************************/
 
     void parseBuffer();
-
     void resetPort();            // chiude la porta se aperta
+
+    // Facciamo il log dei dati di telemetria per analisi offline
+    struct RecSink {
+        bool enabled = false;   // stato REC on/off
+        QFile file;
+        QTextStream ts;         // scrive testo sul file
+        qint64 lines = 0;       // contatore righe per flush periodico
+    };
+
+    std::array<RecSink, 4> _rec;  // contenitore di un RecSink per ogni TelemetryType
+    QString _logDir;              // BASE directory scelta dalla GUI (ComboBox)
+    QString _sessionDir;          // directory effettiva di sessione (BASE + timestamp)
+
+    void ensureRecDir();          // crea _sessionDir se vuota
+    void maybeLogFrame(double tSec, TelemetryType type, quint8 id, qint16 raw, double value);
+    QString typeName(TelemetryType t) const;
+    bool anyRecordingEnabled() const;
+    void stopAllRecording();      // utility
 };
 
 #endif // SERIALWORKER_H
