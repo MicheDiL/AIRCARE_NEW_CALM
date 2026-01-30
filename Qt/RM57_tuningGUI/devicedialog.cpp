@@ -284,17 +284,13 @@ void DeviceDialog::appendTelemetryBatch(const QVector<TelemetrySample>& batch)
 {
     if(batch.isEmpty()) return;
 
-    //////////
-    // Nel caso della PRIMA TIPOLOGIA DI PROTOCOLLO DI STREAMING rappresenta il numero di FRAME che arrivano nel periodo
-    // Nel caso della SECONDA TIPOLOGIA DI PROTOCOLLO DI STREAMING rappresenta il numero di curve/sample che voglio aggiornare
+    // Rappresenta il numero di curve/sample che voglio aggiornare
     _framesCount += batch.size();
-    //////////
 
     for(const auto& s : batch)
     {
         _lastT = s.tSec;  // aggiorna il tempo dell'ultimo batch ricevuto (MCU time)
 
-        ///////////////////////// SECONDA TIPOLOGIA DI PROTOCOLLO DI STREAMING /////////////////////////////
         // Conta i tick reali: riconoscere un tick quando cambia tSec
         // Converti tSec in "chiave ms" robusta (evita problemi float tipo 0.005 -> 0.0049999)
         const qint64 tickKeyMs = qint64(std::llround(s.tSec * 1000.0));
@@ -303,14 +299,12 @@ void DeviceDialog::appendTelemetryBatch(const QVector<TelemetrySample>& batch)
             _lastTickKeyMs = tickKeyMs;
             _tickCount++;
         }
-        ///////////////////////////////////////////////////////////////////////////////////////////////////
 
         // contatori curve
         const int idx = int(s.type)*2 + (s.id ? 1 : 0);
         if(idx>=0 && idx <8){
             _curveCount[idx]++; // conta quanti sample per singola curva (8 curve)
         }
-
 
         QCustomPlot* p = plotForType(s.type);
         if(!p) continue;
@@ -389,12 +383,8 @@ void DeviceDialog::setupPlot(QCustomPlot* p, const QString& yLabel)
 /////////
 void DeviceDialog::updateRatesIfDue()
 {
-    /* Nella PRIMA TIPOLOGIA DI PROTOCOLLO DI STREAMING UART:
-        - misura ogni ~1s quanti TelemetrySample sono arrivati (_framesCount)
-        - stima _framesHz = _framesCount/dt
-        - stima _ticksHz = _framesHz/8 assumendo che arrivino sempre 8 sample per tick
-       Nella SECONDA TIPOLOGIA DI PROTOCOLLO DI STREAMING UART:
-        - conta i tick reali (quanti burst distinti sono arrivati)
+    /*
+       - conta i tick reali (quanti burst distinti sono arrivati)
     */
 
     const qint64 now = _rateWall.elapsed();
@@ -408,12 +398,8 @@ void DeviceDialog::updateRatesIfDue()
 
     _framesHz = _framesCount / dt;  // “Hz” dei sample che arrivano a DeviceDialog
 
-    ///////////// PRIMA TIPOLOGIA DI PROTOCOLLO DI STREAMING UART //////////////////
-    //_ticksHz  = _framesHz / 8.0;    // assume 8 frame per tick
-    //////////// SECONDA TIPOLOGIA DI PROTOCOLLO DI STREAMING UART ////////////////
     // tick rate misurato contando i burst reali
     _ticksHz  = _tickCount / dt;
-    //////////////////////////////////////////////////////////////////////////////
 
     for(int i=0;i<8;i++){
         _curveHz[i] = _curveCount[i] / dt; // Hz per curva

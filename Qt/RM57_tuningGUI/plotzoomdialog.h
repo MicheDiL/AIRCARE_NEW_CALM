@@ -19,9 +19,9 @@ Filosofia adottata per l'interazione con le finestre di popup: follow live quand
 #include <QMetaObject>
 #include <QTimer>
 
+// Forward declaration delle classi
 class QToolButton;
 class QPushButton;
-
 
 class PlotZoomDialog : public QDialog
 {

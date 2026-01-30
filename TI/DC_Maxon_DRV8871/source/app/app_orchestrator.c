@@ -179,10 +179,11 @@ void AppOrch_Init(AppOrch* a,
     // Telemtria su Python
     //Uart_Init(20u, 20u);
 
-    // Telemtria su Qt GUI
-    UartTelemetry_Init(1);      // settaggio periodo telemetria [ms]
+    // Comunicazione UART con Qt GUI
+    UartTelemetry_Init(1);      // settaggio periodo telemetria TX [ms]
     UartRx_Init(&a->s_rx);      // RX
     TuningStore_Init(&a->tune); // tuning da Qt
+    SignalGens_Init(&a->target_gen, 10000);
 
     // ==== Inizializza Bottone =====
     Btn_Init(&a->btn, NULL);                                    // usa configurazione di default per il bottone
@@ -324,78 +325,64 @@ void AppOrch_Tick1kHz(AppOrch* a)
                     a->faults |= APPF_OVERCURRENT;
                 }
 
-                ///////////////////////// DEBUG ///////////////////////////////////////////
-                /* ============== Telemetria su Python ============== */
-                /*int16_t iref_mA = (int16_t)lrintf(a->i_ref1_A  * 1000.0f);
-                int16_t imeas_mA = (int16_t)lrintf(a->i_pcm1_A * 1000.0f);
-                int16_t acm_meas_mA = (int16_t)lrintf(a->i_acm1_A * 1000.0f);
-                int16_t e_mA = (int16_t)lrintf((a->i_ref1_A - a->i_pcm1_A) * 1000.0f);
-                int16_t tensione_bridge = (int16_t)lrintf(a->ctrl.v_tripm1_V);
-
-                uint16_t duty_perm = (uint16_t)lrintf(a->ctrl.duty * 100.0f);
-                uint16_t correzione_duty = (uint16_t)lrintf(a->ctrl.correzione_duty * 1.0f);
-
-                int16_t pos_x = a->adc_pos.enc1_lsb * (ADC_VREF_V / ADC_FS_LSB);
-                int16_t pos_x_V = pos_x * ((R49+R50)/R49);*/
-
-                //Uart_TrySendCurSigned_mA(0/*acm_meas_mA*/, imeas_mA);
-                //Uart_TrySendCur_mA(0, pos_x_V);
-                //Uart_TrySendPos(duty_perm, 0/*a->adc_pos.enc1_lsb*/);
-
-                /* ============== Telemetria su Qt GUI ============== */
-                // ======= TX ========
+                /* ====================================================================
+                 *                          Telemetria RM57 -> Qt GUI
+                 * ====================================================================*/
+                // ======= TX ======== //
+                // DUTYCYCLE
                 float duty_percent = a->ctrl.duty * 100.0f;     // 0..100 [%] ottenuto da duty espresso tra 0 e 1
-                int16_t duty_raw = uart_encode_value(UART_TLM_DUTY, duty_percent); // => %*100
+                int16_t duty_target = uart_encode_value(UART_TLM_DUTY, duty_percent); // => %*100
 
-                float cur_mA = a->i_pcm1_A * 1000.0f;
-                int16_t cur_raw = uart_encode_value(UART_TLM_CURRENT, cur_mA); // => mA*10
+                // CURRENT
+                float cur_meas_mA = a->i_pcm1_A * 1000.0f;
+                int16_t cur_meas        = uart_encode_value(UART_TLM_CURRENT, cur_meas_mA);
+                int16_t cur_target      = uart_encode_value(UART_TLM_CURRENT, a->current_targ_mA);
 
-                int16_t tensione_raw = uart_encode_value(UART_TLM_VOLTAGE, a->ctrl.v_tripm1_V); // => V*1000
+                // VOLTAGE
+                int16_t bridge_meas    = uart_encode_value(UART_TLM_VOLTAGE, a->ctrl.v_tripm1_V);
 
-                int16_t posizione_raw = uart_encode_value(UART_TLM_POSITION, a->adc_pos.enc1_lsb * (ADC_VREF_V / ADC_FS_LSB)); // => V*1000
+                // POSITION
+                /* Su pos_meas usiamo il partitore di tensione al contrario per rientrare nel range 0...5V */
+                int16_t pos_meas        = uart_encode_value(UART_TLM_POSITION, a->adc_pos.enc1_lsb * (ADC_VREF_V / ADC_FS_LSB) * ((R49+R50)/R49));
+                int16_t pos_target      = uart_encode_value(UART_TLM_POSITION, a->position_targ);
 
-                int16_t pos_x_V = a->adc_pos.enc1_lsb * (ADC_VREF_V / ADC_FS_LSB) * ((R49+R50)/R49);
-
+                // SEND TELEMETRY TO Qt
                 UartTelemetryBurst_Tick(
-                  /*Duty*/       0, duty_raw,
-                  /*Correnti*/   cur_raw, 0,
-                  /*Voltaggi*/   tensione_raw, 0,
-                  /*Posizioni*/  posizione_raw, 0
+                  /*Duty       -> meas, target*/   0          , duty_target ,
+                  /*Correnti   -> meas, target*/   cur_meas   , cur_target  ,
+                  /*Voltaggi   -> meas, target*/   bridge_meas, 0           ,
+                  /*Posizioni  -> meas, target*/   pos_meas   , pos_target
                 );
 
-
+                /* ====================================================================
+                 *                          Tuning Qt GUI -> RM57
+                 * ====================================================================*/
                 // ======= RX =======
+                uint16_t avail = DrvSci_RxAvailable();
+                uint16_t budget = (avail > 256u) ? 256u : avail;   // cap per non esagerare
+                UartRx_Poll(&a->s_rx, budget); // leggi dal ring RX fino a budget byte per chiamata
 
-                #ifdef ADD_FUNCTIONS_TO_GUI
-                    uint16_t avail = DrvSci_RxAvailable();
-                    uint16_t budget = (avail > 256u) ? 256u : avail;   // cap per non esagerare
-                    UartRx_Poll(&a->s_rx, budget); // leggi dal ring RX fino a budget byte per chiamata
+                UartTelemetryType sub;
+                uint8_t id, shape;
+                int16_t minRaw, maxRaw, aux1Raw;
+                uint16_t aux2;
 
-                    UartTelemetryType sub;
-                    uint8_t id, shape;
-                    int16_t minRaw, maxRaw, aux1Raw;
-                    uint16_t aux2;
+                /* Pop delle waveform che arrivano nel burst da 66 byte */
+                while (UartRx_PopWaveform(&a->s_rx, &sub, &id, &shape, &minRaw, &maxRaw, &aux1Raw, &aux2)) {
+                    /* Svuota i pending di UartWavePending  e aggiorni a->tune con lo stato più recente per le waveform.*/
+                    TuningStore_ApplyWaveform(&a->tune, (uint8_t)sub, id, shape, minRaw, maxRaw, aux1Raw, aux2);
+                }
 
-                    /* Pop delle waveform che arrivano nel burst da 66 byte */
-                    while (UartRx_PopWaveform(&a->s_rx, &sub, &id, &shape, &minRaw, &maxRaw, &aux1Raw, &aux2)) {
-                        /* Svuota i pending e aggiorni a->tune con lo stato più recente per le waveform.*/
-                        TuningStore_ApplyWaveform(&a->tune, (uint8_t)sub, id, shape, minRaw, maxRaw, aux1Raw, aux2);
-
-                        if(sub == UART_TLM_DUTY){
-                            a->ctrl.duty_gain = UartDecode_Duty01(&a->tune.duty.max_raw);
-                        }
-                    }
-                #endif
-
+                /* Pop dei PID che arrivano nel burst da 66 byte */
                 uint8_t pidId;
                 int32_t kp_m, ki_m, kd_m;
-                /* Pop dei PID che arrivano nel burst da 66 byte */
                 if (UartRx_PopPid(&a->s_rx, &pidId, &kp_m, &ki_m, &kd_m)) {
-                    /* Svuota i pending e aggiorni a->tune con lo stato più recente per i PID.*/
+                    /* Svuota i pending UartPidPending e aggiorni a->tune con lo stato più recente per i PID.*/
                     TuningStore_ApplyPid(&a->tune, pidId, kp_m, ki_m, kd_m);
                 }
 
-                ///////////////////////////////////////////////////////////////////////////////////
+                // Chiama questa funzione dopo che hai svuotato tutte le pending
+                SignalGens_UpdateFromStore(&a->target_gen, &a->tune);
 
             break;
 
@@ -422,18 +409,9 @@ void AppOrch_Tick1kHz(AppOrch* a)
                       uint16_t target = SpGen_Get(&a->spg);   // oppure valore proveniente da host
                       uint16_t y_pos  = a->adc_pos.enc1_lsb;  // posizione JSL asse X
 
-                    // ===== Telemetria =====
-
-                    //Uart_TrySendPos(target, y_pos);                        // ENC1 a 50 Hz
-                    //Uart_TrySendCur(a->adc_set.acm_lsb, a->adc_set.pcm_lsb);           // CORRENTI a 50 Hz (LSB raw)
-                    //Uart_TrySendCur_mA(0, (uint16_t)lrintf(a->i_pcm1_A * 1000.0f));
-
                     // Anello esterno: PD posizione -> I_ref_A (corrente richiesta)
                     PlantControl_Step1kHz(&a->ctrl, target, y_pos);
 
-
-                    Uart_TrySendCur(0, (uint16_t)lrintf(a->i_pcm1_A * 1000.0f));
-                    //Uart_TrySendCur_mA(0, &a->cur_pi.e_A);
                   }
 
               break;
@@ -525,12 +503,19 @@ void AppOrch_Tick10kHz(AppOrch* a)
 
               // CONTROLLO CORRENTE A LOOP APERTO
               //PlantSetDutyDir(&a->ctrl);          // duty cycle onda quadra
-              PlantSetDutyDir_Sine10Hz(&a->ctrl);   // duty cycle onda sinusoidale
+              //PlantSetDutyDir_Sine10Hz(&a->ctrl);   // duty cycle onda sinusoidale
 
+              // Aggiorna i generatori dei target
+              a->ctrl.duty        = WaveGen_Step(&a->target_gen.duty);
+              a->current_targ_mA  = WaveGen_Step(&a->target_gen.current);
+              a->position_targ    = WaveGen_Step(&a->target_gen.position);
+
+              // Applica comandi di dutycyle
               a->ctrl.correzione_duty = a->ctrl.cfg.Vmot_V / a->ctrl.v_tripm1_V;
               a->ctrl.correzione_duty = clamp(a->ctrl.correzione_duty, 0, 1);   // clamp di sicurezza sul fattore di correzione del dutycycle
               a->ctrl.duty = a->ctrl.duty * a->ctrl.correzione_duty;
 
+              a->ctrl.direzione = (a->ctrl.duty >= 0) ? 1 : 0;
               DrvPwm_Drive(a->ctrl.direzione, a->ctrl.duty);
 
           }

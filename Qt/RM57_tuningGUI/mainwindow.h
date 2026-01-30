@@ -17,10 +17,6 @@ Perché serve:
 #include "serialworker.h"
 #include "devicedialog.h"
 
-#ifdef MCU_SIM
-#include "mcusimworker.h"
-#endif
-
 QT_BEGIN_NAMESPACE
 namespace Ui {
 class MainWindow;
@@ -61,17 +57,14 @@ private slots:
 private:
     Ui::MainWindow *ui = nullptr;
 
-    #ifdef ADD_FUNCTIONS_TO_GUI
-        SignalConfig  _sig[4]; // 0 Duty, 1 Current, 2 Position, 3 Voltage
+    SignalConfig  _sig[4]; // 0 Duty, 1 Current, 2 Position, 3 Voltage
 
-        // Quando cambi forma, riempi i campi della pagina visibile con i valori memorizzati nella struct
-        // Risultato: cambi forma e ritrovi gli ultimi valori usati per quella forma
-        void applyDutyUiFromConfig();
-        void applyCurUiFromConfig();
-        void applyPosUiFromConfig();
-        //void applyVoltUiFromConfig();
-
-    #endif
+    // Quando cambi forma, riempi i campi della pagina visibile con i valori memorizzati nella struct
+    // Risultato: cambi forma e ritrovi gli ultimi valori usati per quella forma
+    void applyDutyUiFromConfig();
+    void applyCurUiFromConfig();
+    void applyPosUiFromConfig();
+    //void applyVoltUiFromConfig();
 
     // Thread + Worker
     QThread* _ioThread = nullptr;
@@ -93,11 +86,5 @@ private:
     bool isConnected() const;
 
     void markDirty(bool dirty);
-
-    #ifdef MCU_SIM
-        QThread* _simThread = nullptr;
-        McuSimWorker* _sim = nullptr;
-    #endif
-
 };
 #endif // MAINWINDOW_H

@@ -34,13 +34,6 @@ PID tuning (PidTuningCmdWire 18 byte : Kp/Ki/Kd) solo comando, nessuna telemetri
 #include <QVector>
 
 
-#define ADD_FUNCTIONS_TO_GUI        // Ongi segnale (Duty/Current/Position) può essere di una forma (Sin/ StepTriangle/ Const) e ogni form a ha parametri diversi
-
-#ifdef ADD_FUNCTIONS_TO_GUI
-#else
-#define NO_FUNCTIONS                // Ongi segnale (Duty/Current/Position) ha sempre gli stessi 3 parametri (min, max, freq)
-#endif
-
 /*
     NOTE ENDIANNESS:
     - hdr è uint16. Se MCU e PC sono little-endian, inviando kMagic=0x55AA
@@ -83,7 +76,6 @@ enum class TelemetryType : quint8 { // Tipi di dati plottabili su devicedialog
     //Count
 };
 
-// NEW
 inline quint16 xor16Of32(quint32 v)
 {
     const quint16 lo = quint16(v & 0xFFFFu);
@@ -91,30 +83,6 @@ inline quint16 xor16Of32(quint32 v)
     return quint16(lo ^ hi);
 }
 
-///////////////////////////////////////////////// PRIMA TIPOLOGIA DI PROTOCOLLO DI STREAMING UART  ///////////////////////////////////////////
-#pragma pack(push, 1)
-struct TelemetryPktWire
-{
-    quint16 hdr;        // kMagic
-    quint8  type;       // TelemetryType
-    quint8  id;         // 0..1 con 0 = measure, 1 = target
-    quint32 tick_ms;    // NEW: timestamp RM57
-    qint16  value;      // value_raw = round(value_physical * scaleFor(type))
-    quint16 crc;        // XOR semplice su hdr, meta(type/id), e value
-}; // Quindi un frame contiene un solo valore e “tipo+id” dicono a Qt su quale grafico/curva inserirlo
-#pragma pack(pop)
-
-static_assert(sizeof(TelemetryPktWire) == 12, "TelemetryPktWire must be 12 bytes"); // NEW
-
-// controllo di integrità per rumore casuale facendo XOR (^) tra i campi del pacchetto
-inline quint16 crcTelemetry(const TelemetryPktWire& p)
-{
-    const quint16 meta = quint16(p.type) | (quint16(p.id) << 8);  // meta impacchetta i due byte type e id in una word 16-bit
-    //return quint16(p.hdr ^ meta ^ quint16(p.value));    // Questo corrisponde alla idea “XOR semplice su word”
-    return quint16(p.hdr ^ meta ^ xor16Of32(p.tick_ms) ^ quint16(p.value)); // NEW
-}
-
-///////////////////////////////////////////////// SECONDA TIPOLOGIA DI PROTOCOLLO DI STREAMING UART  ///////////////////////////////////////////
 #pragma pack(push, 1)
 struct TelemetryBurstWire
 {
@@ -134,8 +102,6 @@ inline quint16 crcTelemetryBurst(const TelemetryBurstWire& p)
         c = quint16(c ^ quint16(p.v[i]));
     return c;
 }
-
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 // Conversione Qt-friendly -> Oggetto “comodo” lato Qt per fare il plot (già convertito in double + timestamp)
 struct TelemetrySample
@@ -169,8 +135,7 @@ Q_DECLARE_METATYPE(QVector<TelemetrySample>) // Idem per il tipo QVector<Telemet
     value_real = raw / SCALE
 */
 
-#ifdef ADD_FUNCTIONS_TO_GUI
-
+ // Ongi segnale (Duty/Current/Position) può essere di una forma (Sin/ StepTriangle/ Const) e ogni form a ha parametri diversi
 /* Ogni tab ha una QComboBox per selezionare la forma.
     Sotto c’è un QStackedWidget con 3 pagine:
     Sin → pannello min/max/freq
@@ -181,6 +146,7 @@ enum class SignalShape  : quint8  {
     Sin = 0,
     StepTriangle = 1,
     Const = 2
+
 };
 
 struct SignalConfig  {
@@ -200,7 +166,6 @@ struct SignalConfig  {
     // const
     double constValue = 0.0;
 };
-#endif
 
 inline double scaleFor(TelemetryType t)
 {
@@ -217,7 +182,7 @@ inline double scaleFor(TelemetryType t)
 inline double clampPhysical(TelemetryType t, double v)
 {
     switch (t) {
-    case TelemetryType::Duty:     return qBound(0.0,    v, 100.0);      // %
+    case TelemetryType::Duty:     return qBound(-100.0,  v, 100.0);      // %
     case TelemetryType::Current:  return qBound(-2000.0, v, 2000.0);    // mA
     case TelemetryType::Position: return qBound(-10.0,   v, 10.0);      // ° (ma per ora è V)
     case TelemetryType::Voltage:  return v; // dipende dal tuo range reale
@@ -242,139 +207,73 @@ inline double decodeValue(TelemetryType t, qint16 raw)
 }
 
 enum class CmdType : quint8 {   // tipi di dati da tunare su MCU
-    #ifdef NO_FUNCTIONS
-        SignalTuning = 0x10,  // sizeof(SignalTuningCmdWire) == 12
-    #endif
-    #ifdef ADD_FUNCTIONS_TO_GUI
-        WaveformTuning = 0x11,  // nuovo (16B) <-- quello che useremo
-    #endif
+    WaveformTuning = 0x11,  // nuovo (16B) <-- quello che useremo
     PidTuning    = 0x20   // sizeof(PidTuningCmdWire) == 18
 };  // Questa è la cosa migliore quando ricevi uno stream UART: trovi AA 55, leggi cmd, sai quanti byte aspettarti, poi fai CRC e applichi.
 
-#ifdef NO_FUNCTIONS
-// ---- Command: Signal tuning (12 bytes) ----
-// cmd = SignalTuning
-// sub = TelemetryType (Duty/Current/Position)
-// p1  = min
-// p2  = max
-// p3  = freq_hz (NOTA: qui Hz intero, perché i tuoi spinbox freq hanno decimals=0)
+
 #pragma pack(push, 1)
-struct SignalTuningCmdWire // (12byte)
+struct WaveformTuningCmdWire   // 16 bytes
 {
-    quint16 hdr;      // 2B  = 0x55AA  -> AA 55 on-wire
-    quint8  cmd;      // 1B  = 0x10 (CmdType::SignalTuning)
-    quint8  sub;      // 1B  = TelemetryType (Duty/Current/Voltage/Position)
-    qint16  min;      // 2B  = min (signed)
-    qint16  max;      // 2B  = max (signed)
-    quint16 freq_hz;  // 2B  = Hz interi (unsigned)
-    quint16 crc;      // 2B  = XOR semplice su 16 bit
+    quint16 hdr;     // 0x55AA
+    quint8  cmd;     // 0x11 (CmdType::WaveformTuning)
+    quint8  sub;     // TelemetryType (Duty/Current/Voltage/Position)
+
+    quint8  id;      // 0..1 (noi useremo 1 = target): l'altro id potrebbe essere utile se in futuro si vuole decidere da Qui il tipo di risposta da ottenere dal sistema
+    quint8  shape;   // SignalShape (Sin/StepTriangle/Const)
+
+    qint16  min;     // scaled (come prima)
+    qint16  max;     // scaled
+
+    qint16  aux1;    // Sin: 0 | StepTriangle: stepAmp(scaled) | Const: 0
+    quint16 aux2;    // Sin: freq_Hz | StepTriangle: stepMs | Const: 0
+
+    quint16 crc;     // XOR 16-bit
 };
 #pragma pack(pop)
 
-static_assert(sizeof(SignalTuningCmdWire) == 12, "SignalTuningCmdWire must be 12 bytes");
+static_assert(sizeof(WaveformTuningCmdWire) == 16, "WaveformTuningCmdWire must be 16 bytes");
 
-// controllo di integrità per rumore casuale facendo XOR (^) tra i campi del pacchetto
-inline quint16 crcSignalTuningCmd(const SignalTuningCmdWire& p)
+inline quint16 crcWaveformTuningCmd(const WaveformTuningCmdWire& p)
 {
-    const quint16 meta = quint16(p.cmd) | (quint16(p.sub) << 8); // compattiamo type e id in una word da 16 bit
-    // fai XOR tra tre parole da 16 bit, tutte dello stesso formato
-    return quint16(p.hdr ^ meta ^ quint16(p.min) ^ quint16(p.max) ^ quint16(p.freq_hz));
+    const quint16 meta0 = quint16(p.cmd) | (quint16(p.sub)   << 8);
+    const quint16 meta1 = quint16(p.id)  | (quint16(p.shape) << 8);
+
+    return quint16(p.hdr ^ meta0 ^ meta1 ^
+                   quint16(p.min) ^ quint16(p.max) ^
+                   quint16(p.aux1) ^ quint16(p.aux2));
 }
 
-inline QByteArray makeSignalTuningCmd(TelemetryType t, double minVal, double maxVal, double freqHz)
+inline QByteArray makeWaveformTuningCmd(TelemetryType t, quint8 id, const SignalConfig& cfg)
 {
-    // clamp e ordine
-    minVal = clampPhysical(t, minVal);
-    maxVal = clampPhysical(t, maxVal);
-    if (maxVal < minVal) std::swap(minVal, maxVal);
+    /*  cfg è la reference alla struct contenente tutti i parametri tunabili
+     *  della shape selezionata */
 
-    SignalTuningCmdWire p{};
-    p.hdr = kMagic;
-    p.cmd = quint8(CmdType::SignalTuning);
-    p.sub = quint8(t);  // quale segnale tunare
+    WaveformTuningCmdWire p{};
+    p.hdr   = kMagic;
+    p.cmd   = quint8(CmdType::WaveformTuning);  // Tipo di comando => lato MCU puoi leggere cmd e sai esattamente la dimensione del pacchetto
+    p.sub   = quint8(t);            // Quale TelemetryType sto configurando
+    p.id    = id;                   //  1 = target
+    p.shape = quint8(cfg.type);     // Quale forma (Sin/StepTriangle/Const)
 
-    // min/max nel fixed-point del tipo t
-    const double s = scaleFor(t);
-    const qint32 minRaw = qRound(minVal * s);
-    const qint32 maxRaw = qRound(maxVal * s);
+    auto setMinMax = [&](double mn, double mx){
+        /* Labmda function che prende in input dati presi dal contesto per riferimento ([&])*/
+        mn = clampPhysical(t, mn);
+        mx = clampPhysical(t, mx);
 
-    p.min = qint16(qBound(-32768, minRaw, 32767));
-    p.max = qint16(qBound(-32768, maxRaw, 32767));
+        if(mx < mn) std::swap(mn, mx);
 
-    // freq: intero Hz, clamp 0..65535
-    const int f = qRound(freqHz);
-    p.freq_hz = quint16(qBound(0, f, 10000));
-
-    p.crc = crcSignalTuningCmd(p);   // checksum
-
-    // lo trasformi in QByteArray
-    return QByteArray(reinterpret_cast<const char*>(&p), sizeof(p));
-}
-#endif
-
-#ifdef ADD_FUNCTIONS_TO_GUI
-    #pragma pack(push, 1)
-    struct WaveformTuningCmdWire   // 16 bytes
-    {
-        quint16 hdr;     // 0x55AA
-        quint8  cmd;     // 0x11 (CmdType::WaveformTuning)
-        quint8  sub;     // TelemetryType (Duty/Current/Voltage/Position)
-
-        quint8  id;      // 0..1 (noi useremo 1 = target): l'altro id potrebbe essere utile se in futuro si vuole decidere da Qui il tipo di risposta da ottenere dal sistema
-        quint8  shape;   // SignalShape (Sin/StepTriangle/Const)
-
-        qint16  min;     // scaled (come prima)
-        qint16  max;     // scaled
-
-        qint16  aux1;    // Sin: 0 | StepTriangle: stepAmp(scaled) | Const: 0
-        quint16 aux2;    // Sin: freq_Hz | StepTriangle: stepMs | Const: 0
-
-        quint16 crc;     // XOR 16-bit
+        p.min = encodeValue(t, mn);
+        p.max = encodeValue(t, mx);
     };
-    #pragma pack(pop)
 
-    static_assert(sizeof(WaveformTuningCmdWire) == 16, "WaveformTuningCmdWire must be 16 bytes");
+    // default aux: per alcune forme non servono => li metti a 0 per convenzione
+    p.aux1 = 0;
+    p.aux2 = 0;
 
-    inline quint16 crcWaveformTuningCmd(const WaveformTuningCmdWire& p)
+    // Shape decide come interpretare aux1/aux2
+    switch(cfg.type)
     {
-        const quint16 meta0 = quint16(p.cmd) | (quint16(p.sub)   << 8);
-        const quint16 meta1 = quint16(p.id)  | (quint16(p.shape) << 8);
-
-        return quint16(p.hdr ^ meta0 ^ meta1 ^
-                       quint16(p.min) ^ quint16(p.max) ^
-                       quint16(p.aux1) ^ quint16(p.aux2));
-    }
-
-    inline QByteArray makeWaveformTuningCmd(TelemetryType t, quint8 id, const SignalConfig& cfg)
-    {
-        /*  cfg è la reference alla struct contenente tutti i parametri tunabili
-         *  della shape selezionata */
-
-        WaveformTuningCmdWire p{};
-        p.hdr   = kMagic;
-        p.cmd   = quint8(CmdType::WaveformTuning);  // Tipo di comando => lato MCU puoi leggere cmd e sai esattamente la dimensione del pacchetto
-        p.sub   = quint8(t);            // Quale TelemetryType sto configurando
-        p.id    = id;                   //  1 = target
-        p.shape = quint8(cfg.type);     // Quale forma (Sin/StepTriangle/Const)
-
-        auto setMinMax = [&](double mn, double mx){
-            /* Labmda function che prende in input dati presi dal contesto per riferimento ([&])*/
-            mn = clampPhysical(t, mn);
-            mx = clampPhysical(t, mx);
-
-            if(mx < mn) std::swap(mn, mx);
-
-            p.min = encodeValue(t, mn);
-            p.max = encodeValue(t, mx);
-        };
-
-        // default aux: per alcune forme non servono => li metti a 0 per convenzione
-        p.aux1 = 0;
-        p.aux2 = 0;
-
-        // Shape decide come interpretare aux1/aux2
-        switch(cfg.type)
-        {
         case SignalShape::Sin:
             setMinMax(cfg.min_sin, cfg.max_sin);
             //p.aux2 = cfg.freq_sin;
@@ -398,13 +297,12 @@ inline QByteArray makeSignalTuningCmd(TelemetryType t, double minVal, double max
             p.max = p.min;
             // aux = 0
         } break;
-        }
-
-        p.crc = crcWaveformTuningCmd(p);
-        return QByteArray(reinterpret_cast<const char*>(&p), sizeof(p));
     }
 
-#endif
+    p.crc = crcWaveformTuningCmd(p);
+    return QByteArray(reinterpret_cast<const char*>(&p), sizeof(p));
+}
+
 
 // ---- Command: PID tuning (18 bytes) ----
 // cmd = PidTuning

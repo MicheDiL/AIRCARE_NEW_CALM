@@ -65,10 +65,8 @@ private:
     quint64 _framesCount = 0;                 // quanti TelemetrySample hai ricevuto (tipicamente 8 per tick)
     std::array<quint64, 8> _curveCount{};     // 4 type * 2 id = 8 curve
 
-    // contatori frames (PRIMA TIPOLOGIA DI PROTOCOLLO DI STREAMING UART)
     double _framesHz = 0.0;
     double _ticksHz  = 0.0;
-    // contatori tick (SECONDA TIPOLOGIA DI PROTOCOLLO DI STREAMING UART)
     quint64 _tickCount = 0;
     qint64 _lastTickKeyMs = -1;
 

@@ -3,19 +3,38 @@
 #include <QSerialPortInfo>
 #include <QMessageBox>
 #include <QDoubleSpinBox>
-
 #include <QPixmap>              // ci permette di creare Pixmap object
 
-#ifdef MCU_SIM          // se compili senza MCU_SIM → MCU_SIM_RUN diventa 0
-#ifndef MCU_SIM_RUN     // se compili con MCU_SIM ma metti MCU_SIM_RUN=0 → thread non parte mai
-#define MCU_SIM_RUN 1
-#endif
-#else
-#define MCU_SIM_RUN 0
-#endif
-
 //////////////////////// Helpers /////////////////////////////
-#ifdef ADD_FUNCTIONS_TO_GUI
+ /* mapping espliciti:
+    - ComboIndex → SignalShape
+    - SignalShape → StackPageIndex
+
+In Qt Designer abbiamo:
+    - QComboBox: 0 Sin, 1 Const, 2 StepTriangle
+    - QStackWidget: 0 Sin, 1 Const, 2 StepTriangle*/
+static SignalShape shapeFromComboIndex(int idx)
+{
+    // Combo: Sin, Const, StepTriangle
+    switch (idx) {
+    case 0: return SignalShape::Sin;
+    case 1: return SignalShape::Const;
+    case 2: return SignalShape::StepTriangle;
+    default: return SignalShape::Sin;
+    }
+}
+
+static int pageIndexFromShape(SignalShape sh)
+{
+    // stacked: 0=Sin, 1=Const, 2=Triang
+    switch (sh) {
+    case SignalShape::Sin:          return 0;
+    case SignalShape::Const:        return 1;
+    case SignalShape::StepTriangle: return 2;
+    default: return 1;
+    }
+}
+
 static int toIntMs(double v)
 {
     // tu usi QDoubleSpinBox anche per ms => arrotondo e clampo
@@ -23,7 +42,6 @@ static int toIntMs(double v)
     if(ms < 0) ms = 0;
     return ms;
 }
-#endif
 /////////////////////////////////////////////////////////////
 
 MainWindow::MainWindow(QWidget *parent)
@@ -83,161 +101,137 @@ MainWindow::MainWindow(QWidget *parent)
 
     // ================================================================================================
 
-    #ifdef ADD_FUNCTIONS_TO_GUI
-        // disabilita i controlli delle pagine StepTriang/Const finché non implementi il protocollo
-        ui->pageDutyTriang->setEnabled(true);
-        ui->pageDutyConst->setEnabled(true);
 
-        ui->pageCurrentTriang->setEnabled(true);
-        ui->pageCurrentConst->setEnabled(true);
+    // disabilita i controlli delle pagine StepTriang/Const finché non implementi il protocollo
+    ui->pageDutyTriang->setEnabled(true);
+    ui->pageDutyConst->setEnabled(true);
 
-        ui->pagePositionTriang->setEnabled(true);
-        ui->pagePositionConst->setEnabled(true);
+    ui->pageCurrentTriang->setEnabled(true);
+    ui->pageCurrentConst->setEnabled(true);
 
-        //ui->pageVoltTriang->setEnabled(false);
-        //ui->pageVoltConst->setEnabled(false);
+    ui->pagePositionTriang->setEnabled(true);
+    ui->pagePositionConst->setEnabled(true);
 
-        // Connetto la ComboBox al pannello corrispondente: cambia pannello parametri in base al tipo di segnale selezionato
-        // Helper: collega una combo a uno stacked (stesso ordine delle voci!)
-        auto bindOne = [this](QComboBox* cmb, QStackedWidget* stk, int idxSig, auto applyFn)
+    //ui->pageVoltTriang->setEnabled(false);
+    //ui->pageVoltConst->setEnabled(false);
+
+    // Connetto la ComboBox al pannello corrispondente: cambia pannello parametri in base al tipo di segnale selezionato
+    // Collega la QComboBox della shape (Sin / StepTriangle / Const) allo QStackedWidget che contiene le pagine con i parametri relativi.
+    auto bindOne = [this](QComboBox* cmb, QStackedWidget* stk, int idxSig, auto applyFn)
+    {
+        if(!cmb || !stk) return;
+
+        auto sync = [this, cmb, stk, idxSig, applyFn]()
         {
-            if(!cmb || !stk) return;
+            const SignalShape sh = shapeFromComboIndex(cmb->currentIndex());
 
-            connect(cmb, QOverload<int>::of(&QComboBox::currentIndexChanged),
-                    this, [this, stk, idxSig, applyFn](int idx){
-                        stk->setCurrentIndex(idx);
-                        _sig[idxSig].type = static_cast<SignalShape>(idx);
-                        (this->*applyFn)();       // carica valori nella UI
-                        scheduleSendTuning();     // come facevi prima (live/manual)
-                    });
+            // modello
+            _sig[idxSig].type = sh;
 
-            // sync iniziale
-            stk->setCurrentIndex(cmb->currentIndex());
-            _sig[idxSig].type = static_cast<SignalShape>(cmb->currentIndex());
+            // UI: pagina corretta
+            stk->setCurrentIndex(pageIndexFromShape(sh));
+
+            // carica i valori della shape nel pannello giusto (MODEL -> UI)
             (this->*applyFn)();
+
+            // live/manual
+            scheduleSendTuning();
         };
 
-        // Duty (0)
-        bindOne(ui->cmbDutyType, ui->stkDutyParams, 0, &MainWindow::applyDutyUiFromConfig);
+        connect(cmb, QOverload<int>::of(&QComboBox::currentIndexChanged),
+                this, [sync](int){ sync(); });
 
-        // Current (1)
-        bindOne(ui->cmbCurrentType,  ui->stkCurrentParams,  1, &MainWindow::applyCurUiFromConfig);
+        // sync iniziale
+        sync();
+    };
 
-        // Position (2)
-        bindOne(ui->cmbPositionType,  ui->stkPositionParams,  2, &MainWindow::applyPosUiFromConfig);
+    // Duty (0)
+    bindOne(ui->cmbDutyType, ui->stkDutyParams, 0, &MainWindow::applyDutyUiFromConfig);
 
-        // Voltage (3)
-        //bindOne(ui->cmbVoltType, ui->stkVoltParams, 3, &MainWindow::applyVoltUiFromConfig);
+    // Current (1)
+    bindOne(ui->cmbCurrentType,  ui->stkCurrentParams,  1, &MainWindow::applyCurUiFromConfig);
 
-        // =================================================================================================
-        // Hook spinbox -> schedule: ogni modifica dei parametri va in _sig[i].min_sin, _sig[i].stepAmp, ecc.
-        // =================================================================================================
-        auto hook = [this](QDoubleSpinBox* spn, auto writer){
-            if(!spn) return;
-            connect(spn, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-                    this, [this, writer](double v){
-                        writer(v);
-                        scheduleSendTuning();
-                    });
-        };
+    // Position (2)
+    bindOne(ui->cmbPositionType,  ui->stkPositionParams,  2, &MainWindow::applyPosUiFromConfig);
 
-        // ===================
-        // DUTY (_sig[0])
-        // ===================
-        // Duty - SIN page
-        hook(ui->spnDutyMin,  [this](double v){ _sig[0].min_sin = v; });
-        hook(ui->spnDutyMax,  [this](double v){ _sig[0].max_sin = v; });
-        hook(ui->spnDutyFreq, [this](double v){ _sig[0].freq_sin    = v; });
+    // Voltage (3)
+    //bindOne(ui->cmbVoltType, ui->stkVoltParams, 3, &MainWindow::applyVoltUiFromConfig);
 
-        // Duty - TRIANG page
-        hook(ui->spnDutyMinForTriang,           [this](double v){ _sig[0].min_triang = v; });
-        hook(ui->spnDutyMaxForTriang,           [this](double v){ _sig[0].max_triang = v; });
-        hook(ui->spnDutyStepForTriang,          [this](double v){ _sig[0].stepAmp    = v; });
-        hook(ui->spnDutyStepDurationForTriang,  [this](double v){ _sig[0].stepMs     = toIntMs(v); });
+    // =================================================================================================
+    // Hook spinbox -> schedule: ogni modifica dei parametri va in _sig[i].min_sin, _sig[i].stepAmp, ecc.
+    // =================================================================================================
+    auto hook = [this](QDoubleSpinBox* spn, auto writer){
+        if(!spn) return;
+        connect(spn, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+                this, [this, writer](double v){
+                    writer(v);
+                    scheduleSendTuning();
+                });
+    };
 
-        // Duty - CONST page
-        hook(ui->spnDutyVal, [this](double v){ _sig[0].constValue = v; });
+    // ===================
+    // DUTY (_sig[0])
+    // ===================
+    // Duty - SIN page
+    hook(ui->spnDutyMin,  [this](double v){ _sig[0].min_sin = v; });
+    hook(ui->spnDutyMax,  [this](double v){ _sig[0].max_sin = v; });
+    hook(ui->spnDutyFreq, [this](double v){ _sig[0].freq_sin    = v; });
 
-        // ===================
-        // CURRENT (_sig[1])
-        // ===================
-        hook(ui->spnCurMin,  [this](double v){ _sig[1].min_sin  = v; });
-        hook(ui->spnCurMax,  [this](double v){ _sig[1].max_sin  = v; });
-        hook(ui->spnCurFreq, [this](double v){ _sig[1].freq_sin = v; });
+    // Duty - TRIANG page
+    hook(ui->spnDutyMinForTriang,           [this](double v){ _sig[0].min_triang = v; });
+    hook(ui->spnDutyMaxForTriang,           [this](double v){ _sig[0].max_triang = v; });
+    hook(ui->spnDutyStepForTriang,          [this](double v){ _sig[0].stepAmp    = v; });
+    hook(ui->spnDutyStepDurationForTriang,  [this](double v){ _sig[0].stepMs     = toIntMs(v); });
 
-        hook(ui->spnCurrentMinForTriang,           [this](double v){ _sig[1].min_triang = v; });
-        hook(ui->spnCurrentMaxForTriang,           [this](double v){ _sig[1].max_triang = v; });
-        hook(ui->spnCurrentStepForTriang,          [this](double v){ _sig[1].stepAmp    = v; });
-        hook(ui->spnCurrentStepDurationForTriang,  [this](double v){ _sig[1].stepMs     = toIntMs(v); });
+    // Duty - CONST page
+    hook(ui->spnDutyVal, [this](double v){ _sig[0].constValue = v; });
 
-        hook(ui->spnCurrentVal, [this](double v){ _sig[1].constValue = v; });
+    // ===================
+    // CURRENT (_sig[1])
+    // ===================
+    hook(ui->spnCurMin,  [this](double v){ _sig[1].min_sin  = v; });
+    hook(ui->spnCurMax,  [this](double v){ _sig[1].max_sin  = v; });
+    hook(ui->spnCurFreq, [this](double v){ _sig[1].freq_sin = v; });
 
-        // ===================
-        // POSITION (_sig[2])
-        // ===================
-        hook(ui->spnPosMin,  [this](double v){ _sig[2].min_sin = v; });
-        hook(ui->spnPosMax,  [this](double v){ _sig[2].max_sin = v; });
-        hook(ui->spnPosFreq, [this](double v){ _sig[2].freq_sin    = v; });
+    hook(ui->spnCurrentMinForTriang,           [this](double v){ _sig[1].min_triang = v; });
+    hook(ui->spnCurrentMaxForTriang,           [this](double v){ _sig[1].max_triang = v; });
+    hook(ui->spnCurrentStepForTriang,          [this](double v){ _sig[1].stepAmp    = v; });
+    hook(ui->spnCurrentStepDurationForTriang,  [this](double v){ _sig[1].stepMs     = toIntMs(v); });
 
-        hook(ui->spnPositionMinForTriang,           [this](double v){ _sig[2].min_triang = v; });
-        hook(ui->spnPositionMaxForTriang,           [this](double v){ _sig[2].max_triang = v; });
-        hook(ui->spnPositionStepForTriang,          [this](double v){ _sig[2].stepAmp    = v; });
-        hook(ui->spnPositiontStepDurationForTriang, [this](double v){ _sig[2].stepMs     = toIntMs(v); });
+    hook(ui->spnCurrentVal, [this](double v){ _sig[1].constValue = v; });
 
-        hook(ui->spnPositionVal, [this](double v){ _sig[2].constValue = v; });
+    // ===================
+    // POSITION (_sig[2])
+    // ===================
+    hook(ui->spnPosMin,  [this](double v){ _sig[2].min_sin = v; });
+    hook(ui->spnPosMax,  [this](double v){ _sig[2].max_sin = v; });
+    hook(ui->spnPosFreq, [this](double v){ _sig[2].freq_sin    = v; });
 
-        // ===================
-        // VOLTAGE (_sig[3])
-        // ===================
-        /*hook(ui->spnVoltMin,  [this](double v){ _sig[3].min_sin = v; });
-        hook(ui->spnVoltMax,  [this](double v){ _sig[3].max_sin = v; });
-        hook(ui->spnVoltFreq, [this](double v){ _sig[3].freq    = v; });
+    hook(ui->spnPositionMinForTriang,           [this](double v){ _sig[2].min_triang = v; });
+    hook(ui->spnPositionMaxForTriang,           [this](double v){ _sig[2].max_triang = v; });
+    hook(ui->spnPositionStepForTriang,          [this](double v){ _sig[2].stepAmp    = v; });
+    hook(ui->spnPositiontStepDurationForTriang, [this](double v){ _sig[2].stepMs     = toIntMs(v); });
 
-        hook(ui->spnVoltTriMin,     [this](double v){ _sig[3].min_triang = v; });
-        hook(ui->spnVoltTriMax,     [this](double v){ _sig[3].max_triang = v; });
-        hook(ui->spnVoltTriStepAmp, [this](double v){ _sig[3].stepAmp    = v; });
-        hook(ui->spnVoltTriStepMs,  [this](double v){ _sig[3].stepMs     = toIntMs(v); });
+    hook(ui->spnPositionVal, [this](double v){ _sig[2].constValue = v; });
 
-        hook(ui->spnVoltConstValue, [this](double v){ _sig[3].constValue = v; });*/
+    // ===================
+    // VOLTAGE (_sig[3])
+    // ===================
+    /*hook(ui->spnVoltMin,  [this](double v){ _sig[3].min_sin = v; });
+    hook(ui->spnVoltMax,  [this](double v){ _sig[3].max_sin = v; });
+    hook(ui->spnVoltFreq, [this](double v){ _sig[3].freq    = v; });
 
-    #endif
+    hook(ui->spnVoltTriMin,     [this](double v){ _sig[3].min_triang = v; });
+    hook(ui->spnVoltTriMax,     [this](double v){ _sig[3].max_triang = v; });
+    hook(ui->spnVoltTriStepAmp, [this](double v){ _sig[3].stepAmp    = v; });
+    hook(ui->spnVoltTriStepMs,  [this](double v){ _sig[3].stepMs     = toIntMs(v); });
+
+    hook(ui->spnVoltConstValue, [this](double v){ _sig[3].constValue = v; });*/
 
     // Avvia l'event loop del thread I/O
     _ioThread->start(); // parte il thread ed entra nel suo event loop (coda eventi)
 
-    #ifdef NO_FUNCTIONS
-        // ==========================
-        // Hook spinbox -> schedule
-        // ==========================
-        auto hookSpin = [this](QDoubleSpinBox* spn){
-            if(!spn) return;
-            connect(spn, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-                    this, &MainWindow::scheduleSendTuning);
-        };
-
-        // Signal tuning (min/max/freq)
-        hookSpin(ui->spnDutyMin);
-        hookSpin(ui->spnDutyMax);
-        hookSpin(ui->spnDutyFreq);
-
-        hookSpin(ui->spnCurMin);
-        hookSpin(ui->spnCurMax);
-        hookSpin(ui->spnCurFreq);
-
-        hookSpin(ui->spnPosMin);
-        hookSpin(ui->spnPosMax);
-        hookSpin(ui->spnPosFreq);
-
-        // PID tuning (Kp/Ki/Kd)
-        hookSpin(ui->spnKp);
-        hookSpin(ui->spnKi);
-        hookSpin(ui->spnKd);
-
-    #endif
-
     connect(ui->chkLive, &QCheckBox::toggled, this, &MainWindow::on_chkLive_toggled);
-
-
 
     // Stato iniziale: tuning disabilitato finché non connesso
     ui->grpTuning->setEnabled(false);
@@ -354,19 +348,6 @@ void MainWindow::on_btnDisconnect_clicked()
     // UI
     setConnectedUi(false);
 
-    #if MCU_SIM_RUN
-        if(_sim){
-            QMetaObject::invokeMethod(_sim, "stopSim", Qt::QueuedConnection);
-            _sim = nullptr;
-        }
-        if(_simThread){
-            _simThread->quit();
-            _simThread->wait();
-            _simThread->deleteLater();
-            _simThread = nullptr;
-        }
-    #endif
-
     // chiudo dashboard (puoi anche fare hide se preferisci riusarla)
     if(_dlg){
         _dlg->close();
@@ -397,45 +378,6 @@ void MainWindow::onWorkerConnected(bool ok, QString reason)
 
     // UI
     setConnectedUi(true);
-
-    #if MCU_SIM_RUN
-        // Simulatore attivo: richiede Virtual Serial Port Driver COM1<->COM2
-        // Qt app (SerialWorker) deve aprire COM1; il simulatore aprirà COM2.
-        const QString pcPort = ui->cmbPort->currentText();
-        if(pcPort.compare("COM2", Qt::CaseInsensitive)==0){
-            QMessageBox::warning(this, "Sim", "In SIM mode select COM1 (MCU sim is on COM2).");
-            on_btnDisconnect_clicked();
-            return;
-        }
-
-        if(!_simThread){
-            _simThread = new QThread(this);
-            _sim = new McuSimWorker();
-            _sim->moveToThread(_simThread);
-
-            connect(_simThread, &QThread::finished, _sim, &QObject::deleteLater);
-
-            // logging/status -> GUI
-            /*connect(_sim, &McuSimWorker::simStatus, this, [this](bool ok, const QString& msg){
-                Q_UNUSED(ok);
-                // opzionale: mostra msg su statusbar o qDebug
-                // ui->statusBar->showMessage(msg, 3000);
-            });*/
-
-            connect(_simThread, &QThread::started, this, [this]{
-                // COM2 è il lato "MCU simulato"
-                const int baud = ui->cmbBaud->currentText().toInt();
-                QMetaObject::invokeMethod(_sim, "startSim", Qt::QueuedConnection,
-                                          Q_ARG(QString, "COM2"),
-                                          Q_ARG(int, baud));
-            });
-
-            //
-            connect(_simThread, &QThread::started, _worker, &SerialWorker::startBatching);
-
-            _simThread->start();
-        }
-    #endif
 
     // Regola richiesta:
     // - LIVE: invio tuning con debounce (quindi pianifico sendAllTuning tra kDebounceMs)
@@ -536,131 +478,36 @@ void MainWindow::sendAllTuning()    // Ogni volta che viene chiamta vengono emes
 {
     if(!isConnected()) return;
 
-    #ifdef ADD_FUNCTIONS_TO_GUI
+    // =================================================================
+    // Signal tuning: un solo evento queued, un solo write verso driver
+    // =================================================================
 
-        // =================================================================
-        // Signal tuning: un solo evento queued, un solo write verso driver
-        // =================================================================
+    QByteArray out; // array di byte in cui sono contenuti i segnali di tuning verso RM57
 
-        QByteArray out; // array di byte in cui sono contenuti i segnali di tuning verso RM57
+    // Costruiamo i pacchetti WaveformTuningCmdWire da 16 bytes per Duty/Current/Postion
+    out += makeWaveformTuningCmd(TelemetryType::Duty,     1, _sig[0]);  // type, id 1 = target, SignalConfig
+    out += makeWaveformTuningCmd(TelemetryType::Current,  1, _sig[1]);
+    out += makeWaveformTuningCmd(TelemetryType::Position, 1, _sig[2]);
 
-        // Costruiamo i pacchetti WaveformTuningCmdWire da 16 bytes per Duty/Current/Postion
-        out += makeWaveformTuningCmd(TelemetryType::Duty,     1, _sig[0]);  // type, id 1 = target, SignalConfig
-        out += makeWaveformTuningCmd(TelemetryType::Current,  1, _sig[1]);
-        out += makeWaveformTuningCmd(TelemetryType::Position, 1, _sig[2]);
+    out += makePidTuningCmd(
+        /*pidId*/0,
+        ui->spnKp->value(),
+        ui->spnKi->value(),
+        ui->spnKd->value()
+        );
 
-    #endif
+    emit requestWrite(out);     /*<-- UN SOLO emit => UN SOLO evento queued verso serialworker => UN SOLO unico write(out) dove out contiene:
 
-    #ifdef NO_FUNCTIONS
-        // ==========================================================
-        // Signal tuning: 4 eventi queued + 4 chiamate a _sp->write()
-        // ==========================================================
-        /*
-        // Duty / Current / Position
-        emit requestWrite(makeSignalTuningCmd(
-            TelemetryType::Duty,
-            ui->spnDutyMin->value(),
-            ui->spnDutyMax->value(),
-            ui->spnDutyFreq->value()
-            ));
-
-        emit requestWrite(makeSignalTuningCmd(
-            TelemetryType::Current,
-            ui->spnCurMin->value(),
-            ui->spnCurMax->value(),
-            ui->spnCurFreq->value()
-            ));
-
-        emit requestWrite(makeSignalTuningCmd(
-            TelemetryType::Position,
-            ui->spnPosMin->value(),
-            ui->spnPosMax->value(),
-            ui->spnPosFreq->value()
-            ));
-
-        // Voltage: NON tunabile -> nessun comando.
-
-        // PID
-        emit requestWrite(makePidTuningCmd(
-            0,  //pidId
-            ui->spnKp->value(),
-            ui->spnKi->value(),
-            ui->spnKd->value()
-            ));
-
-        // Manual mode: pulisco dirty e disabilito Apply
-        markDirty(false);
-        */
-
-        /* Sia nel caso LIVE ON che LIVE OFF, la differenza tra LIVE e MANUALE è solo quando
-         * arrivi a chiamare sendAllTuning() (debounce vs Apply).
-         * Dopo l’emit la pipeline è identica: i 4 emit non “scrivono” subito: diventano 4 eventi QMetaCallEvent
-         * in coda al _ioThread. Dopo i 4 emit, nella queue del _ioThread ci sono 4 chiamate a _sp->write(data) (di SerialWorker) in ordine.
-            Nota: l’ordine resta quello di emissione (Duty → Current → Position → PID) perché sono 4 eventi accodati
-                   ovvero i 4 frame (12 + 12 + 12 + 18 byte)
-           Dunque quando _ioThread gira nel suo event loop prende gli eventi uno per uno ed esegue _sp->write(data);
-           Di seguito una ottimizzazione che riduce il carico delle chiamate.
-        */
-
-        // =================================================================
-        // Signal tuning: un solo evento queued, un solo write verso driver
-        // =================================================================
-
-        QByteArray out;
-        out.reserve(12 + 12 + 12 + 18); // pre-alloca il buffer così non riallochi più volte mentre appendi
-
-        out += makeSignalTuningCmd(
-            TelemetryType::Duty,
-            ui->spnDutyMin->value(),
-            ui->spnDutyMax->value(),
-            ui->spnDutyFreq->value()
-            );
-
-        out += makeSignalTuningCmd(
-            TelemetryType::Current,
-            ui->spnCurMin->value(),
-            ui->spnCurMax->value(),
-            ui->spnCurFreq->value()
-            );
-
-        out += makeSignalTuningCmd(
-            TelemetryType::Position,
-            ui->spnPosMin->value(),
-            ui->spnPosMax->value(),
-            ui->spnPosFreq->value()
-            );
-        #endif
-
-        out += makePidTuningCmd(
-            /*pidId*/0,
-            ui->spnKp->value(),
-            ui->spnKi->value(),
-            ui->spnKd->value()
-            );
-
-        emit requestWrite(out);     /*<-- UN SOLO emit => UN SOLO evento queued verso serialworker => UN SOLO unico write(out) dove out contiene:
-
-        CASO NO_FUNCTIONS:
-        3 × SignalTuningCmdWire da 12 byte = 36 B
-
-            1 × PidTuningCmdWire da 18 byte = 18 B
-                Totale = 54 byte consecutivi sul filo.
-
-              Quindi sul pin RX della SCI3 arrivano 54 byte back-to-back (più start/stop UART) con timing dettato dal baudrate.
-
-        CASO ADD_FUNCTIONS_TO_GUI:
         3 × WaveformTuningCmdWire da 16 byte (Duty/Current/Position, id=1 “target”)
 
-            1 × PidTuningCmdWire da 18 byte
+        1 × PidTuningCmdWire da 18 byte
 
-                Totale: 16 + 16 + 16 + 18 = 66 byte consecutivi*/
+            Totale: 16 + 16 + 16 + 18 = 66 byte consecutivi*/
 
-        markDirty(false);
+    markDirty(false);
 
 }
 
-
-#ifdef ADD_FUNCTIONS_TO_GUI
 void MainWindow::applyDutyUiFromConfig()
 {
     // blocco i segnali di tutti i controlli duty che tocco
@@ -804,4 +651,4 @@ void MainWindow::applyPosUiFromConfig()
         break;
     }
 }*/
-#endif
+

@@ -18,23 +18,25 @@ static inline void normalize_minmax(int16_t* mn, int16_t* mx)
     }
 }
 
-#ifdef ADD_FUNCTIONS_TO_GUI
-    static inline TuneWaveform* select_dst(TuningStore* s, uint8_t sub)
-    {
-        /* ATTENZIONE: sub deve matchare TelemetryType Qt:
-           Duty=0, Current=1, Voltage=2, Position=3 */
-        switch (sub) {
-            case 0u: return &s->duty;
-            case 1u: return &s->current;
-            case 3u: return &s->position;  /* Position = 3 */
-            default: return NULL;
-        }
+static inline TuneWaveform* select_dst(TuningStore* s, uint8_t sub)
+{
+    /* ATTENZIONE: sub deve matchare TelemetryType Qt:
+       Duty=0, Current=1, Voltage=2, Position=3 */
+    switch (sub) {
+        case 0u: return &s->duty;
+        case 1u: return &s->current;
+        case 3u: return &s->position;  /* Position = 3 */
+        default: return NULL;
     }
-#endif
+}
+
 //===========================================================
 
 void TuningStore_Init(TuningStore* s)
 {
+    if(!s) return;
+        memset(s, 0, sizeof(*s));   // inizializza a 0 tutti i parametri di TuneWaveform per duty, current e position; inizializza a 0 tutti i parametri di TunePid
+
     s->duty.valid = false;
     s->current.valid = false;
     s->position.valid = false;
@@ -43,66 +45,46 @@ void TuningStore_Init(TuningStore* s)
     s->version = 0u;
 }
 
-#ifdef NO_FUNCTIONS
-    void TuningStore_ApplySignal(TuningStore* s, uint8_t sub, int16_t minRaw, int16_t maxRaw, uint16_t freq_hz)
-    {
-        normalize_minmax(&minRaw, &maxRaw);
 
-        if (freq_hz > 10000u) freq_hz = 10000u; // guard rail
+void TuningStore_ApplyWaveform(TuningStore* s,
+                               uint8_t sub,
+                               uint8_t id,
+                               uint8_t shape,
+                               int16_t minRaw,
+                               int16_t maxRaw,
+                               int16_t aux1Raw,
+                               uint16_t aux2)
+{
+    TuneWaveform* dst = select_dst(s, sub);
+    if (!dst) return;
 
-        TuneSignal* dst = 0;
+    normalize_minmax(&minRaw, &maxRaw);
 
-        /* ATTENZIONE: sub deve matchare TelemetryType Qt */
-        switch (sub) {
-            case 0: dst = &s->duty; break;
-            case 1: dst = &s->current; break;
-            case 3: dst = &s->position; break; // nel tuo uart_to_qt: POSITION = 3
-            default: return;
-        }
+    /* guard-rail su shape */
+    if (shape > (uint8_t)TUNE_SHAPE_CONST) return;
 
-        dst->min_raw = minRaw;
-        dst->max_raw = maxRaw;
-        dst->freq_hz = freq_hz;
-        dst->valid   = true;
+    /* guard-rail su id (per ora accettiamo solo 0..1) */
+    if (id > 1u) return;
 
-        s->version++;
+    /* guard-rail su aux2 per evitare numeri “tossici” */
+    if (aux2 > 60000u) aux2 = 60000u;
+
+    if(shape == TUNE_SHAPE_CONST) {
+        aux1Raw = 0;
+        aux2 = 0;
     }
-#endif
-#ifdef ADD_FUNCTIONS_TO_GUI
-    void TuningStore_ApplyWaveform(TuningStore* s,
-                                   uint8_t sub,
-                                   uint8_t id,
-                                   uint8_t shape,
-                                   int16_t minRaw,
-                                   int16_t maxRaw,
-                                   int16_t aux1Raw,
-                                   uint16_t aux2)
-    {
-        TuneWaveform* dst = select_dst(s, sub);
-        if (!dst) return;
 
-        normalize_minmax(&minRaw, &maxRaw);
+    dst->id       = id;
+    dst->shape    = shape;
+    dst->min_raw  = minRaw;
+    dst->max_raw  = maxRaw;
+    dst->aux1_raw = aux1Raw;
+    dst->aux2     = aux2;
+    dst->valid    = true;       // tutto corretto e safe
 
-        /* guard-rail su shape */
-        if (shape > (uint8_t)TUNE_SHAPE_CONST) return;
-
-        /* guard-rail su id (per ora accettiamo solo 0..1) */
-        if (id > 1u) return;
-
-        /* guard-rail su aux2 per evitare numeri “tossici” */
-        if (aux2 > 60000u) aux2 = 60000u;
-
-        dst->id       = id;
-        dst->shape    = shape;
-        dst->min_raw  = minRaw;
-        dst->max_raw  = maxRaw;
-        dst->aux1_raw = aux1Raw;
-        dst->aux2     = aux2;
-        dst->valid    = true;       // tutto corretto e safe
-
-        s->version++;
-    }
-#endif
+    // attualmente incrementa anche se i valori di tuning che arrivano da Qt sono identici ai precedenti già inviati
+    s->version++;
+}
 
 void TuningStore_ApplyPid(TuningStore* s, uint8_t pidId, int32_t kp_m, int32_t ki_m, int32_t kd_m)
 {

@@ -46,6 +46,7 @@ source/HL_sys_main.obj: C:/Users/mdilucchio/OneDrive\ -\ Fondazione\ Istituto\ I
 source/HL_sys_main.obj: C:/Users/mdilucchio/OneDrive\ -\ Fondazione\ Istituto\ Italiano\ Tecnologia/Desktop/DC_Maxon_DRV8871/include/HL_mibspi.h
 source/HL_sys_main.obj: C:/Users/mdilucchio/OneDrive\ -\ Fondazione\ Istituto\ Italiano\ Tecnologia/Desktop/DC_Maxon_DRV8871/include/HL_reg_mibspi.h
 source/HL_sys_main.obj: C:/Users/mdilucchio/OneDrive\ -\ Fondazione\ Istituto\ Italiano\ Tecnologia/Desktop/DC_Maxon_DRV8871/include/button/pushbutton.h
+source/HL_sys_main.obj: C:/Users/mdilucchio/OneDrive\ -\ Fondazione\ Istituto\ Italiano\ Tecnologia/Desktop/DC_Maxon_DRV8871/include/target_generators/waveform_engine.h
 source/HL_sys_main.obj: C:/Users/mdilucchio/OneDrive\ -\ Fondazione\ Istituto\ Italiano\ Tecnologia/Desktop/DC_Maxon_DRV8871/include/tests/pcm_tests.h
 source/HL_sys_main.obj: C:/Users/mdilucchio/OneDrive\ -\ Fondazione\ Istituto\ Italiano\ Tecnologia/Desktop/DC_Maxon_DRV8871/include/controller/current_ctrl.h
 source/HL_sys_main.obj: C:/Users/mdilucchio/OneDrive\ -\ Fondazione\ Istituto\ Italiano\ Tecnologia/Desktop/DC_Maxon_DRV8871/include/setpoint/sp_CurGen.h
@@ -141,6 +142,8 @@ C:/Users/mdilucchio/OneDrive\ -\ Fondazione\ Istituto\ Italiano\ Tecnologia/Desk
 C:/Users/mdilucchio/OneDrive\ -\ Fondazione\ Istituto\ Italiano\ Tecnologia/Desktop/DC_Maxon_DRV8871/include/HL_reg_mibspi.h:
 
 C:/Users/mdilucchio/OneDrive\ -\ Fondazione\ Istituto\ Italiano\ Tecnologia/Desktop/DC_Maxon_DRV8871/include/button/pushbutton.h:
+
+C:/Users/mdilucchio/OneDrive\ -\ Fondazione\ Istituto\ Italiano\ Tecnologia/Desktop/DC_Maxon_DRV8871/include/target_generators/waveform_engine.h:
 
 C:/Users/mdilucchio/OneDrive\ -\ Fondazione\ Istituto\ Italiano\ Tecnologia/Desktop/DC_Maxon_DRV8871/include/tests/pcm_tests.h:
 

@@ -54,6 +54,7 @@ ORDERED_OBJS += \
 "./source/sampling_adc/drv_adc.obj" \
 "./source/setpoint/sp_CurGen.obj" \
 "./source/setpoint/sp_gen.obj" \
+"./source/target_generators/waveform_engine.obj" \
 "./source/tests/pcm_tests.obj" \
 "./source/tuning/tuning_store.obj" \
 "../source/HL_sys_link.cmd" \
@@ -79,6 +80,7 @@ RMDIR := RMDIR /S/Q
 -include source/power_up_ups/subdir_vars.mk
 -include source/sampling_adc/subdir_vars.mk
 -include source/setpoint/subdir_vars.mk
+-include source/target_generators/subdir_vars.mk
 -include source/tests/subdir_vars.mk
 -include source/tuning/subdir_vars.mk
 -include source/subdir_rules.mk
@@ -93,6 +95,7 @@ RMDIR := RMDIR /S/Q
 -include source/power_up_ups/subdir_rules.mk
 -include source/sampling_adc/subdir_rules.mk
 -include source/setpoint/subdir_rules.mk
+-include source/target_generators/subdir_rules.mk
 -include source/tests/subdir_rules.mk
 -include source/tuning/subdir_rules.mk
 -include objects.mk
@@ -213,9 +216,9 @@ DC_Maxon_DRV8871.out: $(OBJS) $(CMD_SRCS) $(GEN_CMDS)
 clean:
 	-$(RM) $(EXE_OUTPUTS__QUOTED)
 	-$(RM) "source\HL_adc.obj" "source\HL_epc.obj" "source\HL_errata.obj" "source\HL_errata_SSWF021_45.obj" "source\HL_esm.obj" "source\HL_etpwm.obj" "source\HL_gio.obj" "source\HL_mibspi.obj" "source\HL_nmpu.obj" "source\HL_notification.obj" "source\HL_pinmux.obj" "source\HL_rti.obj" "source\HL_sci.obj" "source\HL_sys_core.obj" "source\HL_sys_dma.obj" "source\HL_sys_intvecs.obj" "source\HL_sys_main.obj" "source\HL_sys_mpu.obj" "source\HL_sys_pcr.obj" "source\HL_sys_phantom.obj" "source\HL_sys_pmm.obj" "source\HL_sys_pmu.obj" "source\HL_sys_startup.obj" "source\HL_sys_vim.obj" "source\HL_system.obj" "source\app\app_calibrator.obj" "source\app\app_orchestrator.obj" "source\button\pushbutton.obj" "source\control_timer\drv_rti.obj" "source\controller\ctrl_pid.obj" "source\controller\ctrl_pid_defaults.obj" "source\controller\current_ctrl.obj" "source\debug\drv_sci.obj" "source\debug\uart.obj" "source\debug\uart_to_qt.obj" "source\leds\signaling_leds.obj" "source\motor_driver\drv_etpwm.obj" "source\plant\plant_control.obj" 
-	-$(RM) "source\plant\plant_control_defaults.obj" "source\power_up_ups\board_power.obj" "source\sampling_adc\current_ctrl.obj" "source\sampling_adc\drv_adc.obj" "source\setpoint\sp_CurGen.obj" "source\setpoint\sp_gen.obj" "source\tests\pcm_tests.obj" "source\tuning\tuning_store.obj" 
+	-$(RM) "source\plant\plant_control_defaults.obj" "source\power_up_ups\board_power.obj" "source\sampling_adc\current_ctrl.obj" "source\sampling_adc\drv_adc.obj" "source\setpoint\sp_CurGen.obj" "source\setpoint\sp_gen.obj" "source\target_generators\waveform_engine.obj" "source\tests\pcm_tests.obj" "source\tuning\tuning_store.obj" 
 	-$(RM) "source\HL_adc.d" "source\HL_epc.d" "source\HL_errata.d" "source\HL_errata_SSWF021_45.d" "source\HL_esm.d" "source\HL_etpwm.d" "source\HL_gio.d" "source\HL_mibspi.d" "source\HL_nmpu.d" "source\HL_notification.d" "source\HL_pinmux.d" "source\HL_rti.d" "source\HL_sci.d" "source\HL_sys_dma.d" "source\HL_sys_main.d" "source\HL_sys_pcr.d" "source\HL_sys_phantom.d" "source\HL_sys_pmm.d" "source\HL_sys_startup.d" "source\HL_sys_vim.d" "source\HL_system.d" "source\app\app_calibrator.d" "source\app\app_orchestrator.d" "source\button\pushbutton.d" "source\control_timer\drv_rti.d" "source\controller\ctrl_pid.d" "source\controller\ctrl_pid_defaults.d" "source\controller\current_ctrl.d" "source\debug\drv_sci.d" "source\debug\uart.d" "source\debug\uart_to_qt.d" "source\leds\signaling_leds.d" "source\motor_driver\drv_etpwm.d" "source\plant\plant_control.d" "source\plant\plant_control_defaults.d" "source\power_up_ups\board_power.d" "source\sampling_adc\current_ctrl.d" "source\sampling_adc\drv_adc.d" "source\setpoint\sp_CurGen.d" 
-	-$(RM) "source\setpoint\sp_gen.d" "source\tests\pcm_tests.d" "source\tuning\tuning_store.d" 
+	-$(RM) "source\setpoint\sp_gen.d" "source\target_generators\waveform_engine.d" "source\tests\pcm_tests.d" "source\tuning\tuning_store.d" 
 	-$(RM) "source\HL_sys_core.d" "source\HL_sys_intvecs.d" "source\HL_sys_mpu.d" "source\HL_sys_pmu.d" 
 	-@echo 'Finished clean'
 	-@echo ' '

@@ -123,6 +123,7 @@ source/plant \
 source/power_up_ups \
 source/sampling_adc \
 source/setpoint \
+source/target_generators \
 source/tests \
 source/tuning \
 

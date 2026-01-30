@@ -42,6 +42,7 @@
 "./source/sampling_adc/drv_adc.obj"
 "./source/setpoint/sp_CurGen.obj"
 "./source/setpoint/sp_gen.obj"
+"./source/target_generators/waveform_engine.obj"
 "./source/tests/pcm_tests.obj"
 "./source/tuning/tuning_store.obj"
 "../source/HL_sys_link.cmd"

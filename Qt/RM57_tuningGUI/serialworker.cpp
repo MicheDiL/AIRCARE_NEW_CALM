@@ -1,10 +1,8 @@
 #include "serialworker.h"
 #include <cstring> // memcpy
-
 // Facciamo il log dei dati di telemetria per analisi offline
 #include <QDateTime>
 #include <QDir>
-
 #include <QThread>
 
 SerialWorker::SerialWorker(QObject* parent)
@@ -318,7 +316,6 @@ void SerialWorker::parseBuffer()
     // Magic bytes di kMagic=0x55AA => in little-endian AA 55
     static const QByteArray magic("\xAA\x55", 2);
 
-    //const int frameSize = int(sizeof(TelemetryPktWire)); // esiste un frame fisso TelemetryPktWire di dimensione sizeof(TelemetryPktWire) (12 byte) // PRIMA TIPOLOGIA DI PROTOCOLLO DI STREAMING UART
     const int frameSize = int(sizeof(TelemetryBurstWire)); // unico burst da 24B contenente tutti i dati di streaming
 
     while (_rx.size() >= frameSize) {   // Se hai meno di 8 byte: non puoi fare niente, aspetti il prossimo chunk
@@ -341,7 +338,6 @@ void SerialWorker::parseBuffer()
             return;
 
         // 2) Copia i bytes nella struct packed
-        //TelemetryPktWire p{}; // PRIMA TIPOLOGIA DI PROTOCOLLO DI STREAMING UART
         TelemetryBurstWire p{};
 
         std::memcpy(&p, _rx.constData(), frameSize);    // memcpy = copia byte-per-byte. Qui il presupposto è che TelemetryPktWire sia packed (senza padding). Tipico: #pragma pack(push,1)
@@ -349,7 +345,6 @@ void SerialWorker::parseBuffer()
         // 3) Validazione: hdr e CRC
         const bool magicOk = (p.hdr == kMagic);
         // ricostruisce il checksum e lo confronta
-        //const bool crcOk   = (p.crc == crcTelemetry(p)); // PRIMA TIPOLOGIA DI PROTOCOLLO DI STREAMING UART
         const bool crcOk   = (p.crc == crcTelemetryBurst(p));
 
         if (!magicOk || !crcOk) {
@@ -362,8 +357,6 @@ void SerialWorker::parseBuffer()
         _rx.remove(0, frameSize);   // rimuovi il frame dal buffer
 
         // 5) Crei sample “GUI-friendly”
-
-        //TelemetrySample s{}; // PRIMA TIPOLOGIA DI PROTOCOLLO DI STREAMING UART
 
         //s.tSec  = _t0.elapsed() / 1000.0;   // tempo di arrivo/parse su PC, non il tempo di campionamento su RM57, convertito da ms a s
         /* ORIGINE DEL PROBLEMA DI VISUALIZZAZIONE DEI DATI:
@@ -378,14 +371,7 @@ void SerialWorker::parseBuffer()
          stessa tSec, lo scorrimento X non rappresenta più il tempo reale di acquisizione
         */
         // NEW: SOLUZIONE AL PROBLEMA
-        //s.tSec  = double(p.tick_ms) / 1000.0;              // <-- TEMPO RM57 convertito da ms->s   // PRIMA TIPOLOGIA DI STREAMING UART
-
-
-        //s.type  = static_cast<TelemetryType>(p.type);   // PRIMA TIPOLOGIA DI PROTOCOLLO DI STREAMING UART
-        //s.id    = p.id; // PRIMA TIPOLOGIA DI PROTOCOLLO DI STREAMING UART
-
-        // conversione raw -> unità fisiche coerenti con scaleFor()
-        //s.value = decodeValue(s.type, p.value); // PRIMA TIPOLOGIA DI PROTOCOLLO DI STREAMING UART
+        //s.tSec  = double(p.tick_ms) / 1000.0;              // <-- TEMPO RM57 convertito da ms->s
 
         //emit telemetryReceived(s);  // emesso nel thread del worker, ricevuto in GUI con queued connection → aggiornare QCustomPlot è safe
         /* Se la telemetria è ad alta frequenza, emit telemetryReceived per ogni frame può saturare la event queue del GUI thread.
@@ -394,15 +380,6 @@ void SerialWorker::parseBuffer()
                 - mandi batch ogni X ms (es. 20–50ms) o ogni N samples
         Così il plot resta fluido.
         */
-
-        // --- DUTY LOGGING (first 1000 samples) ---
-        //maybeLogFrame(s.tSec, s.type, s.id, p.value, s.value); // PRIMA TIPOLOGIA DI PROTOCOLLO DI STREAMING UART
-
-        // --- end logging ---
-
-        //_pending.push_back(s); // accumula sample da far plottare al thread GUI // PRIMA TIPOLOGIA DI PROTOCOLLO DI STREAMING UART
-
-        ////////////////////////////// SECONDA TIPOLOGIA DI STREAMING UART ///////////////////////////////////////
 
         // PARSING DI 1 BURST IN 8 TELEMETRYSAMPLE (UNO PER CURVA)
         const double tSec = double(p.tick_ms) / 1000.0; // timestamp RM57 convertito da ms->s
@@ -435,7 +412,6 @@ void SerialWorker::parseBuffer()
 
         push(TelemetryType::Position, 0, p.v[6]);
         push(TelemetryType::Position, 1, p.v[7]);
-        //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
         // Il batch di pacchetti TelemetrySample accumulati in _pending viene spedito verso GUI o dal timer _flushTimer (ogni 33ms) o se il numero di campioni accumulati supera la soglia _flushMaxSamples
         if(_pending.size() >= _flushMaxSamples){

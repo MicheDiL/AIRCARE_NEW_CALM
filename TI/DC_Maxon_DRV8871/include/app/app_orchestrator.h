@@ -21,11 +21,11 @@
 #include "sampling_adc/drv_adc.h"
 #include "sampling_adc/current_sense.h"
 #include "motor_driver/drv_etpwm.h"
-#include "debug/uart_to_qt.h"           //#include "debug/uart.h"
+#include "debug/uart_to_qt.h"
 #include "tuning/tuning_store.h"
 #include "leds/signaling_leds.h"
 #include "button/pushbutton.h"
-
+#include "target_generators/waveform_engine.h"
 #include "tests/pcm_tests.h"
 #include "controller/current_ctrl.h"
 #include "setpoint/sp_CurGen.h"
@@ -100,6 +100,7 @@ typedef struct {
   /* Tuning da Qt */
   UartRxCtx s_rx;
   TuningStore tune;
+  SignalGens  target_gen;
 
   /* === NEW: stato IIR + alpha precomputata === */
   PcmIirState     pcm_iir;
@@ -117,7 +118,8 @@ typedef struct {
   float           i_acm1_A;           // corrente approx (IPROPI)
   float           i_ref1_A;           // riferimento corrente (per futuro PI) */
   float           i_meas1_A_last;     // NEW: ultimo campione per telemetria a 1 kHz
-
+  float           current_targ_mA;
+  float           position_targ;
   /* Offset PCM runtime */
   float           pcm_offset_lsb;
   float           pcm_offset_v;
